@@ -31,7 +31,6 @@ screening:
     change_pct_max: 8.5
     price_min: 3
     price_max: 220
-  tech_weight: 0.35
   factor_weights:
     value: 0.22
     liquidity: 0.18

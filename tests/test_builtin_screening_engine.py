@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import pandas as pd
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient as FastAPITestClient
 
@@ -74,6 +75,7 @@ def test_bundled_strategies_are_loaded_from_the_internal_package() -> None:
         "balanced_alpha",
         "blue_chip_income",
         "capital_heat",
+        "dragon_board",
         "dual_low",
         "low_volatility_quality",
         "momentum_quality",
@@ -120,6 +122,57 @@ def test_screening_config_reads_snapshot_cache_ttl() -> None:
         config = ScreeningRuntimeConfig.from_env()
 
     assert config.snapshot_cache_ttl_seconds == 120.0
+
+
+def test_realtime_strategy_rejects_eod_snapshot(monkeypatch) -> None:
+    snapshot_df = pd.DataFrame(
+        [{
+            "code": "000001",
+            "name": "Ping An",
+            "price": 10.0,
+            "change_pct": 7.0,
+            "amount": 300_000_000.0,
+        }]
+    )
+    snapshot_df.attrs.update({
+        "snapshot_source": "tushare",
+        "snapshot_mode": "eod",
+        "source_errors": [],
+        "fallback_used": False,
+    })
+    strategy = Strategy(
+        name="realtime-demo",
+        display_name="Realtime Demo",
+        description="demo",
+        screening=ScreeningConfig(
+            enabled=True,
+            market_scope=["cn"],
+            hard_filters=HardFilterConfig(),
+            factor_weights={"momentum": 1.0},
+            snapshot_requirements={"mode": "realtime"},
+            max_output=3,
+        ),
+    )
+    config = ScreeningRuntimeConfig(
+        strategies_dir=SCREENING_ROOT / "strategies",
+        post_analyzers=[],
+        risk_enabled=False,
+        portfolio_diversity_enabled=False,
+    )
+
+    monkeypatch.setattr(
+        screening_pipeline,
+        "load_all_strategies",
+        lambda _path: {"realtime-demo": strategy},
+    )
+    monkeypatch.setattr(
+        screening_pipeline,
+        "fetch_snapshot_with_fallback",
+        lambda *args, **kwargs: snapshot_df.copy(),
+    )
+
+    with pytest.raises(RuntimeError, match="requires realtime snapshot"):
+        screening_pipeline.screen("realtime-demo", use_llm=False, config=config)
 
 
 def test_pipeline_passes_daily_history_cache_settings_to_enrichment(monkeypatch) -> None:
@@ -611,6 +664,36 @@ def test_snapshot_schema_mismatch_counts_toward_source_circuit_breaker(
     assert calls == ["efinance"]
     assert result.attrs["snapshot_source"] == "efinance"
     assert "temporarily disabled" in result.attrs["source_errors"][0]
+
+
+def test_realtime_snapshot_requirement_skips_eod_source(monkeypatch) -> None:
+    source_health: dict[str, dict[str, object]] = {}
+    eod_snapshot = pd.DataFrame(
+        [{"code": "000001", "name": "Ping An", "price": 10.0, "volume_ratio": 1.5}]
+    )
+    eod_snapshot.attrs["snapshot_mode"] = "eod"
+    realtime_snapshot = pd.DataFrame(
+        [{"code": "000002", "name": "Vanke", "price": 11.0, "volume_ratio": 2.0}]
+    )
+    realtime_snapshot.attrs["snapshot_mode"] = "realtime"
+
+    monkeypatch.setattr(
+        screening_snapshot,
+        "fetch_cn_snapshot",
+        lambda source: eod_snapshot.copy() if source == "tushare" else realtime_snapshot.copy(),
+    )
+    monkeypatch.setattr(screening_snapshot, "_SOURCE_HEALTH", source_health)
+
+    result = screening_snapshot.fetch_snapshot_with_fallback(
+        ["tushare", "efinance"],
+        required_columns=["volume_ratio"],
+        required_snapshot_mode="realtime",
+    )
+
+    assert result.attrs["snapshot_source"] == "efinance"
+    assert result.attrs["snapshot_mode"] == "realtime"
+    assert "requires realtime snapshot" in result.attrs["source_errors"][0]
+    assert "tushare" not in source_health
 
 
 def test_sina_snapshot_uses_timeout_wrapper(monkeypatch) -> None:

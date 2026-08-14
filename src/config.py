@@ -1133,6 +1133,14 @@ class Config:
     # Server酱3 推送配置
     serverchan3_sendkey: Optional[str] = None  # Server酱3 SendKey
 
+    # 企业微信应用消息推送配置（corpid/agentid/secret 模式，可同步至个人微信）
+    wechat_work_corpid: Optional[str] = None  # 企业ID
+    wechat_work_agentid: Optional[str] = None  # 应用ID
+    wechat_work_secret: Optional[str] = None  # 应用Secret
+    wechat_work_touser: Optional[str] = None  # 接收人（@all 表示全员，默认 @all）
+    wechat_work_msg_type: str = "text"  # 消息类型：text（微信可读）/ markdown
+    wechat_work_max_bytes: int = 2000  # 单条字节上限（应用消息 2048），超长自动分片
+
     # 分析间隔时间（秒）- 用于避免API限流
     analysis_delay: float = 0.0  # 个股分析与大盘分析之间的延迟
 
@@ -1198,6 +1206,17 @@ class Config:
     market_review_color_scheme: str = "green_up"
     # 交易日检查：默认启用，非交易日跳过执行；设为 false 或 --force-run 可强制执行（Issue #373）
     trading_day_check_enabled: bool = True
+
+    # 盘内盯盘后台任务：开盘时段内每 N 分钟对 STOCK_LIST 做轻量技术面分析并推送（不调 LLM）
+    intraday_watch_enabled: bool = False
+    intraday_watch_interval_minutes: int = 30  # 盯盘轮询间隔（分钟），调度器最小粒度 30 秒
+    intraday_watch_market: str = "cn"  # 盘中门控市场：cn/hk/us
+    intraday_market_monitor_enabled: bool = False
+    intraday_market_monitor_interval_minutes: int = 10
+    intraday_market_trend_threshold_pct: float = 0.35
+    intraday_screening_enabled: bool = False
+    intraday_screening_times: List[str] = field(default_factory=lambda: ["10:00", "14:00"])
+    intraday_screening_max_results: int = 5
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2018,6 +2037,17 @@ class Config:
             pushplus_token=os.getenv('PUSHPLUS_TOKEN'),
             pushplus_topic=os.getenv('PUSHPLUS_TOPIC'),
             serverchan3_sendkey=os.getenv('SERVERCHAN3_SENDKEY'),
+            wechat_work_corpid=os.getenv('WECHAT_WORK_CORPID'),
+            wechat_work_agentid=os.getenv('WECHAT_WORK_AGENTID'),
+            wechat_work_secret=os.getenv('WECHAT_WORK_SECRET'),
+            wechat_work_touser=os.getenv('WECHAT_WORK_TOUSER'),
+            wechat_work_msg_type=(os.getenv('WECHAT_WORK_MSG_TYPE', 'text') or 'text').lower(),
+            wechat_work_max_bytes=parse_env_int(
+                os.getenv('WECHAT_WORK_MAX_BYTES'),
+                2000,
+                field_name='WECHAT_WORK_MAX_BYTES',
+                minimum=1,
+            ),
             custom_webhook_urls=[u.strip() for u in os.getenv('CUSTOM_WEBHOOK_URLS', '').split(',') if u.strip()],
             custom_webhook_bearer_token=os.getenv('CUSTOM_WEBHOOK_BEARER_TOKEN'),
             custom_webhook_body_template=unescape_compose_sensitive_env_value(
@@ -2158,6 +2188,45 @@ class Config:
                 os.getenv('MARKET_REVIEW_COLOR_SCHEME', 'green_up')
             ),
             trading_day_check_enabled=os.getenv('TRADING_DAY_CHECK_ENABLED', 'true').lower() != 'false',
+            intraday_watch_enabled=os.getenv('INTRADAY_WATCH_ENABLED', 'false').lower() == 'true',
+            intraday_watch_interval_minutes=parse_env_int(
+                os.getenv('INTRADAY_WATCH_INTERVAL_MINUTES'),
+                30,
+                field_name='INTRADAY_WATCH_INTERVAL_MINUTES',
+                minimum=1,
+            ),
+            intraday_watch_market=(os.getenv('INTRADAY_WATCH_MARKET', 'cn') or 'cn').lower(),
+            intraday_market_monitor_enabled=parse_env_bool(
+                os.getenv('INTRADAY_MARKET_MONITOR_ENABLED'),
+                default=False,
+            ),
+            intraday_market_monitor_interval_minutes=parse_env_int(
+                os.getenv('INTRADAY_MARKET_MONITOR_INTERVAL_MINUTES'),
+                10,
+                field_name='INTRADAY_MARKET_MONITOR_INTERVAL_MINUTES',
+                minimum=1,
+            ),
+            intraday_market_trend_threshold_pct=parse_env_float(
+                os.getenv('INTRADAY_MARKET_TREND_THRESHOLD_PCT'),
+                0.35,
+                field_name='INTRADAY_MARKET_TREND_THRESHOLD_PCT',
+                minimum=0.0,
+            ),
+            intraday_screening_enabled=parse_env_bool(
+                os.getenv('INTRADAY_SCREENING_ENABLED'),
+                default=False,
+            ),
+            intraday_screening_times=normalize_schedule_times(
+                os.getenv('INTRADAY_SCREENING_TIMES', '10:00,14:00'),
+                fallback_time='10:00',
+            ),
+            intraday_screening_max_results=parse_env_int(
+                os.getenv('INTRADAY_SCREENING_MAX_RESULTS'),
+                5,
+                field_name='INTRADAY_SCREENING_MAX_RESULTS',
+                minimum=1,
+                maximum=20,
+            ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=parse_env_int(os.getenv('WEBUI_PORT'), 8000, field_name='WEBUI_PORT', minimum=1, maximum=65535),

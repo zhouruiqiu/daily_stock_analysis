@@ -37,7 +37,6 @@ screening:
     volatility_20d_pct_max: 32.0
     max_drawdown_20d_pct_min: -8.0
     atr_20_pct_max: 4.5
-  tech_weight: 0.30
   factor_weights:
     stability: 0.30
     value: 0.20

@@ -2,11 +2,11 @@
 # Licensed under Apache-2.0 and modified for daily_stock_analysis.
 # 稳健价值策略
 name: quality_value
-display_name: 稳健价值
-description: 估值合理、流动性充足、波动不过热，并要求有温和活跃度确认的稳健候选
-version: "1.1"
+display_name: 低估值稳健
+description: 基于PE/PB、流动性、市值和交易稳定性发现低估值候选，不包含ROE或现金流质量硬筛选
+version: "1.2"
 category: value
-tags: [value, quality, stability, dynamic_signal]
+tags: [value, stability, dynamic_signal]
 style:
   risk_profile: defensive
   holding_period: watchlist
@@ -31,7 +31,6 @@ screening:
     change_pct_max: 5.0
     price_min: 3
     price_max: 180
-  tech_weight: 0.15
   factor_weights:
     value: 0.32
     stability: 0.24
@@ -67,7 +66,7 @@ screening:
     volume_spike_ratio: 4.0
   ranking_hints: |
     优先关注：
-    1. 估值合理且不是依赖单日情绪推动的标的
+    1. PE/PB 相对较低且不是依赖单日情绪推动的标的
     2. 成交额足够、涨跌幅不过热，适合后续深度分析
-    3. 兼顾行业地位、现金流质量、分红或经营稳定性线索
+    3. ROE、现金流、负债和盈利稳定性仅由后续深度分析核查，不属于本策略硬条件
   max_output: 5

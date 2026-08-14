@@ -99,6 +99,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
             "backtest": False,
             "market_review": False,
             "schedule": False,
+            "intraday_watch_only": False,
             "no_run_immediately": False,
             "no_notify": False,
             "check_notify": False,
@@ -581,6 +582,49 @@ class MainScheduleModeTestCase(unittest.TestCase):
         worker.run_once.assert_called_once_with()
         info_log.assert_any_call("[EventMonitor] 本轮触发 %d 条提醒", 2)
 
+    def test_schedule_mode_registers_intraday_session_coordinator(self) -> None:
+        args = self._make_args(schedule=True)
+        config = self._make_config(
+            intraday_watch_enabled=False,
+            intraday_market_monitor_enabled=True,
+            intraday_screening_enabled=True,
+        )
+        coordinator = MagicMock()
+        coordinator.tick.return_value = {"market_monitor": True, "screening": False}
+        scheduled_call = {}
+
+        def fake_run_with_schedule(
+            task,
+            schedule_time,
+            run_immediately,
+            background_tasks=None,
+            schedule_time_provider=None,
+            **kwargs,
+        ):
+            scheduled_call["background_tasks"] = background_tasks or []
+
+        with patch("main.parse_arguments", return_value=args), \
+             patch("main.get_config", return_value=config), \
+             patch("main._reload_runtime_config", return_value=config), \
+             patch("main._build_schedule_time_provider", return_value=lambda: "18:00"), \
+             patch("main.setup_logging"), \
+             patch("main.run_full_analysis"), \
+             patch(
+                 "src.services.intraday_session_scheduler.IntradaySessionCoordinator",
+                 return_value=coordinator,
+             ), \
+             patch("src.scheduler.run_with_schedule", side_effect=fake_run_with_schedule):
+            exit_code = main.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(scheduled_call["background_tasks"]), 1)
+        background_task = scheduled_call["background_tasks"][0]
+        self.assertEqual(background_task["name"], "intraday_session")
+        self.assertEqual(background_task["interval_seconds"], 30)
+        self.assertTrue(background_task["run_immediately"])
+        background_task["task"]()
+        coordinator.tick.assert_called_once_with()
+
     def test_schedule_mode_registers_event_monitor_worker_without_legacy_rules(self) -> None:
         args = self._make_args(schedule=True)
         config = self._make_config(
@@ -641,6 +685,30 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         run_diagnostics.assert_called_once_with(config)
         print_output.assert_called_once_with("通知配置诊断")
+        start_api_server.assert_not_called()
+        run_full_analysis.assert_not_called()
+
+    def test_intraday_watch_only_returns_before_web_and_analysis(self) -> None:
+        args = self._make_args(
+            intraday_watch_only=True,
+            serve=True,
+            schedule=True,
+            market_review=True,
+        )
+        config = self._make_config(webui_enabled=False)
+
+        with patch("main.parse_arguments", return_value=args), \
+             patch("main.get_config", return_value=config), \
+             patch("main.start_api_server") as start_api_server, \
+             patch("main.run_full_analysis") as run_full_analysis, \
+             patch(
+                 "src.services.intraday_watch_worker.run_intraday_watch_loop",
+                 return_value=0,
+             ) as run_watch:
+            exit_code = main.main()
+
+        self.assertEqual(exit_code, 0)
+        run_watch.assert_called_once_with(config_provider=main._reload_runtime_config)
         start_api_server.assert_not_called()
         run_full_analysis.assert_not_called()
 

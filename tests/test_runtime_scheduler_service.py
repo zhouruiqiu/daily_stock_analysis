@@ -87,6 +87,33 @@ class _SynchronousThread(_NoopThread):
 
 
 class RuntimeSchedulerServiceTestCase(unittest.TestCase):
+    def test_intraday_session_background_task_uses_wall_clock_polling(self) -> None:
+        config = SimpleNamespace(
+            intraday_watch_enabled=False,
+            intraday_market_monitor_enabled=False,
+            intraday_screening_enabled=True,
+        )
+        coordinator = MagicMock()
+        coordinator.tick.return_value = {"screening": True}
+
+        with patch(
+            "src.services.intraday_session_scheduler.IntradaySessionCoordinator",
+            return_value=coordinator,
+        ):
+            from src.services.runtime_scheduler import build_intraday_watch_background_tasks
+
+            tasks = build_intraday_watch_background_tasks(
+                config,
+                config_provider=lambda: config,
+            )
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["name"], "intraday_session")
+        self.assertEqual(tasks[0]["interval_seconds"], 30)
+        self.assertTrue(tasks[0]["run_immediately"])
+        tasks[0]["task"]()
+        coordinator.tick.assert_called_once_with()
+
     def test_run_analysis_args_include_workers(self) -> None:
         config = SimpleNamespace(
             schedule_enabled=True,

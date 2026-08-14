@@ -192,6 +192,68 @@ sudo systemctl status stock-analyzer
 journalctl -u stock-analyzer -f
 ```
 
+### 3.1 Safely deploy a local workspace to an existing systemd service
+
+When the remote Python virtual environment and systemd unit already exist, use
+`scripts/deploy_remote.sh` to publish the current local workspace without Git.
+The script never uploads or replaces the remote `.env`, `venv/`, `data/`,
+`logs/`, `reports/`, or local secret files. It builds the Web application
+locally and deploys only the generated `static/` assets.
+
+Export the deployment settings in the local terminal. Never put a password in
+the script or environment; configure an SSH key, or let OpenSSH request the
+password interactively.
+
+```bash
+export DSA_DEPLOY_TARGET='deploy@example.com'
+export DSA_DEPLOY_ROOT='/absolute/path/to/daily_stock_analysis'
+export DSA_DEPLOY_SERVICE='your-systemd-service'
+export DSA_DEPLOY_HEALTH_URL='http://127.0.0.1:8000/api/health'
+```
+
+Inspect the allowlist first, then deploy:
+
+```bash
+./scripts/deploy_remote.sh --dry-run --skip-tests
+./scripts/deploy_remote.sh
+```
+
+A normal deployment runs Python syntax/flake8 checks, Web lint/build, static
+asset validation, remote staging validation, a runtime backup, systemd restart,
+and a health check. A failed health check immediately restores the pre-deploy
+code backup. If the local and remote `requirements.txt` files differ, the
+script stops before service downtime; update the remote `venv` explicitly so
+dependency changes are never mistaken for rollback-safe code changes.
+
+Backups are stored at
+`${DSA_DEPLOY_ROOT}/deploy-backups/runtime-before-<deployment-id>.tar.gz`.
+Use the deployment ID printed after a successful release for manual rollback:
+
+```bash
+./scripts/deploy_remote.sh --rollback '<deployment-id>'
+```
+
+### 3.2 Independent intraday watch service
+
+The Web process in `--serve-only` mode does not start intraday watching. For
+scheduled market-hours notifications, run a separate systemd service with:
+
+```ini
+ExecStart=/absolute/path/to/venv/bin/python main.py --intraday-watch-only
+Restart=always
+```
+
+The service shares the project `.env` with the Web process. Self-selected stock
+watching uses `INTRADAY_WATCH_*`, broad-market trend monitoring uses
+`INTRADAY_MARKET_MONITOR_*`, and dynamic 10:00/14:00 screening uses
+`INTRADAY_SCREENING_*`. Each capability can be enabled independently and sends
+through an available `NOTIFICATION_ALERT_CHANNELS` channel. Restart and verify
+both the Web and intraday-watch services after deploying code.
+
+For an emergency release, `--skip-tests` skips local Python and Web build
+checks, but still validates the existing `static/` assets and remote stage.
+`--dry-run` never opens a network connection.
+
 ---
 
 ## Configuration Guide

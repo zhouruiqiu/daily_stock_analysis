@@ -83,6 +83,7 @@ from src.notification_sender import (
     SlackSender,
     TelegramSender,
     WechatSender,
+    WechatWorkAppSender,
     WECHAT_IMAGE_MAX_BYTES,
     resolve_gotify_message_endpoint,
     resolve_ntfy_endpoint,
@@ -198,6 +199,7 @@ class NotificationChannel(Enum):
     DISCORD = "discord"    # Discord 机器人 (Bot)
     SLACK = "slack"        # Slack
     ASTRBOT = "astrbot"
+    WECHAT_WORK_APP = "wechat_work_app"  # 企业微信应用消息（可同步至个人微信）
     UNKNOWN = "unknown"    # 未知
 
 
@@ -248,6 +250,7 @@ class ChannelDetector:
             NotificationChannel.CUSTOM: "自定义Webhook",
             NotificationChannel.DISCORD: "Discord机器人",
             NotificationChannel.SLACK: "Slack",
+            NotificationChannel.WECHAT_WORK_APP: "企业微信应用消息",
             NotificationChannel.ASTRBOT: "ASTRBOT机器人",
             NotificationChannel.UNKNOWN: "未知渠道",
         }
@@ -268,7 +271,8 @@ class NotificationService(
     Serverchan3Sender,
     SlackSender,
     TelegramSender,
-    WechatSender
+    WechatSender,
+    WechatWorkAppSender
 ):
     """
     通知服务
@@ -326,6 +330,7 @@ class NotificationService(
         SlackSender.__init__(self, config)
         TelegramSender.__init__(self, config)
         WechatSender.__init__(self, config)
+        WechatWorkAppSender.__init__(self, config)
         DingtalkSender.__init__(self, config)
 
         # 检测所有已配置的渠道
@@ -478,6 +483,12 @@ class NotificationService(
 
         if getattr(config, "wechat_webhook_url", None):
             channels.append(NotificationChannel.WECHAT)
+        if (
+            getattr(config, "wechat_work_corpid", None)
+            and getattr(config, "wechat_work_agentid", None)
+            and getattr(config, "wechat_work_secret", None)
+        ):
+            channels.append(NotificationChannel.WECHAT_WORK_APP)
         if getattr(config, "dingtalk_webhook_url", None):
             channels.append(NotificationChannel.DINGTALK)    
 
@@ -2576,6 +2587,8 @@ class NotificationService(
             if use_image:
                 return self._send_slack_image(image_bytes, fallback_content=content)
             return self.send_to_slack(content)
+        if channel == NotificationChannel.WECHAT_WORK_APP:
+            return self.send_to_wechat_work_app(sanitized_content)
         if channel == NotificationChannel.ASTRBOT:
             return self.send_to_astrbot(sanitized_content)
         logger.warning(f"不支持的通知渠道: {channel}")

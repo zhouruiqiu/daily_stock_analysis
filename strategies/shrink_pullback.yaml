@@ -13,7 +13,9 @@ required_tools:
 aliases: [缩量回踩, 回踩]
 default_router: true
 default_priority: 40
-market_regimes: [trending_down, sideways]
+market_regimes: [trending_up]
+# 修正：缩量回踩是上升趋势中的买点（多头排列后回踩均线），
+# 不是下跌/震荡市策略。原标注 [trending_down, sideways] 是错误的。
 
 instructions: |
   **缩量回踩（Shrink Volume Pullback Strategy）**

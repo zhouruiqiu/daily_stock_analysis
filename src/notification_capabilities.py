@@ -181,6 +181,14 @@ CHANNEL_PROFILES: Dict[str, ChannelProfile] = {
         default_mode="plain_fallback",
         supports_link=True,
     ),
+    "wechat_work_app": ChannelProfile(
+        channel="wechat_work_app",
+        markdown="markdown",
+        default_mode="full_report",
+        max_text_bytes=2000,
+        supports_link=False,
+        notes="Enterprise WeChat application message; syncs to personal WeChat. Sender IP must be in the app trusted IP allowlist.",
+    ),
     "unknown": ChannelProfile(
         channel="unknown",
         markdown="plain_text",

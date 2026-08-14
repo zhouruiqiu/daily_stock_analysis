@@ -344,7 +344,7 @@ const PortfolioPage: React.FC = () => {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: queryAccountId,
         costMethod,
-        includeRealtime: false,
+        includeRealtime: true,
       });
       setSnapshot(snapshotData);
       setError(null);
@@ -353,7 +353,7 @@ const PortfolioPage: React.FC = () => {
         const riskData = await portfolioApi.getRisk({
           accountId: queryAccountId,
           costMethod,
-          includeRealtime: false,
+          includeRealtime: true,
         });
         setRisk(riskData);
       } catch (riskErr) {
@@ -856,7 +856,7 @@ const PortfolioPage: React.FC = () => {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: requestedAccountId,
         costMethod: requestedCostMethod,
-        includeRealtime: false,
+        includeRealtime: true,
       });
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return false;
@@ -868,7 +868,7 @@ const PortfolioPage: React.FC = () => {
         const riskData = await portfolioApi.getRisk({
           accountId: requestedAccountId,
           costMethod: requestedCostMethod,
-          includeRealtime: false,
+          includeRealtime: true,
         });
         if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
           return false;
@@ -1222,7 +1222,12 @@ const PortfolioPage: React.FC = () => {
                     return (
                     <tr key={rowKey} className="border-b border-white/5">
                       <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
-                      <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
+                      <td className="py-2 pr-2">
+                        <div className="font-mono text-foreground">{row.symbol}</div>
+                        {row.name ? (
+                          <div className="text-xs text-secondary">{row.name}</div>
+                        ) : null}
+                      </td>
                       <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
                       <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
                       <td className="py-2 pr-2 text-right">

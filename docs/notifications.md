@@ -8,6 +8,7 @@
 | --- | --- | --- | --- | --- |
 | 钉钉 Webhook | 静态配置 | `DINGTALK_WEBHOOK_URL` | `DINGTALK_SECRET` | 支持加签安全方式，已接入 Web UI 设置页与单渠道测试。 |
 | 企业微信 | 静态配置 | `WECHAT_WEBHOOK_URL` | `WECHAT_MSG_TYPE` | 配置后参与批量通知发送 |
+| 企业微信应用消息 | 静态配置 | `WECHAT_WORK_CORPID`, `WECHAT_WORK_AGENTID`, `WECHAT_WORK_SECRET` | `WECHAT_WORK_TOUSER`, `WECHAT_WORK_MSG_TYPE`, `WECHAT_WORK_MAX_BYTES` | 走「微信插件」可同步至个人微信；发送方 IP 须在应用「企业可信 IP」白名单（否则 errcode 60020） |
 | 飞书 Webhook / App Bot | 静态配置 | `FEISHU_WEBHOOK_URL` 或 `FEISHU_APP_ID` + `FEISHU_APP_SECRET` + `FEISHU_CHAT_ID` | `FEISHU_WEBHOOK_SECRET`, `FEISHU_WEBHOOK_KEYWORD`, `FEISHU_RECEIVE_ID_TYPE`, `FEISHU_DOMAIN` | Webhook URL 优先；未配置 Webhook 时，App Bot 三元组可主动向指定群/用户推送。`FEISHU_STREAM_ENABLED` 仅代表事件订阅 / Stream Bot，不参与主动通知配置完成判断 |
 | Telegram | 静态配置 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `TELEGRAM_MESSAGE_THREAD_ID` | token 与 chat id 必须同时存在 |
 | 邮件 | 静态配置 | `EMAIL_SENDER`, `EMAIL_PASSWORD` | `EMAIL_RECEIVERS`, `EMAIL_SENDER_NAME` | `EMAIL_RECEIVERS` 留空时发给自己 |
@@ -141,7 +142,7 @@ python main.py --check-notify
 
 Web 设置页的“通知渠道”分类提供单渠道测试入口。测试会使用当前页面草稿值合成临时配置，发送一条真实测试通知，但不会保存 `.env`，也不会修改运行时全局配置。
 
-- 测试范围：14 个静态通知渠道，不包含 `UNKNOWN` 和运行时上下文渠道。
+- 测试范围：15 个静态通知渠道，不包含 `UNKNOWN` 和运行时上下文渠道。
 - 普通渠道：返回单次发送结果、耗时和通用错误码。
 - 自定义 Webhook：按 URL 顺序返回 attempts，展示每个 URL 的成功/失败、HTTP 状态、耗时和错误码；多个 URL 部分成功时，顶层 message 会标出成功数 / 总数。
 - 返回结果会脱敏 token、secret、password、Bearer、完整 webhook query 和疑似 path token。
@@ -222,10 +223,10 @@ P3 新增三类通知路由配置：
 | 路由类型 | 配置 key | 当前生产者 |
 | --- | --- | --- |
 | `report` | `NOTIFICATION_REPORT_CHANNELS` | 单股推送、聚合日报、大盘复盘、合并推送、飞书文档成功链接 |
-| `alert` | `NOTIFICATION_ALERT_CHANNELS` | EventMonitor 触发通知 |
+| `alert` | `NOTIFICATION_ALERT_CHANNELS` | EventMonitor 触发通知、盘内自选盯盘速报 |
 | `system_error` | `NOTIFICATION_SYSTEM_ERROR_CHANNELS` | 预留能力；当前不新增自动系统错误生产者 |
 
-配置值为逗号分隔渠道枚举：`wechat,dingtalk,feishu,telegram,email,pushover,ntfy,gotify,pushplus,serverchan3,custom,discord,slack,astrbot`。
+配置值为逗号分隔渠道枚举：`wechat,wechat_work_app,dingtalk,feishu,telegram,email,pushover,ntfy,gotify,pushplus,serverchan3,custom,discord,slack,astrbot`。
 
 - 留空或未配置：保持旧行为，发送到所有已配置静态渠道。
 - 非空：只发送到路由列表与已配置渠道的交集；交集为空时不会 fallback 到全渠道。
@@ -234,6 +235,39 @@ P3 新增三类通知路由配置：
 - 路由过滤发生在 Markdown 转图片前，`MARKDOWN_TO_IMAGE_CHANNELS` 只对路由后的渠道子集生效。
 - `MERGE_EMAIL_NOTIFICATION` 不需要额外配置；只要 `email` 仍在 report 路由后的渠道中，现有合并邮件行为保持不变。
 - `--check-notify` 会把未知渠道值报为 error，把合法但未启用的路由目标报为 warning。
+
+### 盘内自选盯盘
+
+推荐将轻量盯盘作为独立进程运行，避免启用每日完整分析调度：
+
+```bash
+python main.py --intraday-watch-only
+```
+
+需设置 `INTRADAY_WATCH_ENABLED=true`；执行间隔由
+`INTRADAY_WATCH_INTERVAL_MINUTES` 控制，默认 30 分钟。调度以 09:30 和
+13:30 为起点对齐墙上时钟，不会从上一轮完成时间开始延迟。每轮都会从当前
+`.env` 重新读取 `STOCK_LIST`，因此 Web 保存自选后无需重启盯盘服务。
+该任务不调用 LLM、不抓新闻，并通过 `alert` 路由推送；午休、盘后、休市和市场
+阶段判断失败时只记录跳过日志，不发送消息。
+
+同一独立进程还可启用 `INTRADAY_MARKET_MONITOR_ENABLED=true`，默认每 10
+分钟对上证、深证和创业板指数取样。连续 3 个样本中至少 2 个指数同向，且累计
+涨跌幅中位数达到 `INTRADAY_MARKET_TREND_THRESHOLD_PCT`（默认 0.35%）时，
+只在“持续上涨/持续下跌/恢复中性”状态切换时推送。
+
+启用 `INTRADAY_SCREENING_ENABLED=true` 后，系统会在
+`INTRADAY_SCREENING_TIMES`（默认 10:00,14:00）选股：持续上涨使用
+`dragon_board`，持续下跌使用 `low_volatility_quality`，中性震荡使用
+`shrink_pullback`，并将最多 `INTRADAY_SCREENING_MAX_RESULTS`（默认 5）只候选股
+通过 `alert` 路由推送。选股与大盘监控都会跳过非交易日。
+
+每只股票的速报同时给出确定性综合评分、建议、风险等级和主要加减分原因，不调用
+LLM。数据库中存在持仓时，评分由技术面 70 分和成本/浮盈亏 30 分组成，并展示
+成本价、按当前支撑与成本计算的防守位及浮盈亏；非持仓自选使用归一化技术评分，
+明确标记为“自选观察”，不会使用“继续持有”等持仓措辞。持仓读取失败时整轮自动
+降级为技术观察。评分只是规则化风险提示，不构成投资建议，也不能替代仓位和账户
+整体风险管理。
 
 ## 聚合报告失败隔离
 

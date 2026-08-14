@@ -37,6 +37,7 @@ from src.notification_sender import (
     SlackSender,
     TelegramSender,
     WechatSender,
+    WechatWorkAppSender,
     WECHAT_IMAGE_MAX_BYTES,
 )
 
@@ -1642,6 +1643,84 @@ class TestPushplusSender(unittest.TestCase):
         sender = PushplusSender(cfg)
 
         result = sender.send_to_pushplus("A" * 25000)
+
+        self.assertTrue(result)
+        self.assertGreaterEqual(mock_post.call_count, 2)
+
+
+class TestWechatWorkAppSender(unittest.TestCase):
+    """Unit tests for WechatWorkAppSender (Enterprise WeChat application message)."""
+
+    def test_send_returns_false_when_credentials_missing(self):
+        cfg = _config()
+        sender = WechatWorkAppSender(cfg)
+        result = sender.send_to_wechat_work_app("hello")
+        self.assertFalse(result)
+
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.post")
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.get")
+    def test_send_success_returns_true_and_uses_text_payload(self, mock_get, mock_post):
+        mock_get.return_value = _response(200, {"errcode": 0, "access_token": "T", "expires_in": 7200})
+        mock_post.return_value = _response(200, {"errcode": 0})
+        cfg = _config(
+            wechat_work_corpid="CORP",
+            wechat_work_agentid="1000002",
+            wechat_work_secret="SECRET",
+        )
+        sender = WechatWorkAppSender(cfg)
+        result = sender.send_to_wechat_work_app("hello")
+
+        self.assertTrue(result)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["msgtype"], "text")
+        self.assertEqual(payload["text"]["content"], "hello")
+        self.assertEqual(payload["agentid"], 1000002)
+        self.assertEqual(payload["touser"], "@all")
+
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.post")
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.get")
+    def test_send_returns_false_when_gettoken_fails(self, mock_get, mock_post):
+        mock_get.return_value = _response(200, {"errcode": 40001, "errmsg": "invalid credential"})
+        cfg = _config(
+            wechat_work_corpid="CORP",
+            wechat_work_agentid="1000002",
+            wechat_work_secret="SECRET",
+        )
+        sender = WechatWorkAppSender(cfg)
+        result = sender.send_to_wechat_work_app("hello")
+
+        self.assertFalse(result)
+        mock_post.assert_not_called()
+
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.post")
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.get")
+    def test_send_returns_false_on_nonzero_errcode(self, mock_get, mock_post):
+        mock_get.return_value = _response(200, {"errcode": 0, "access_token": "T", "expires_in": 7200})
+        mock_post.return_value = _response(200, {"errcode": 60020, "errmsg": "ip not allowed"})
+        cfg = _config(
+            wechat_work_corpid="CORP",
+            wechat_work_agentid="1000002",
+            wechat_work_secret="SECRET",
+        )
+        sender = WechatWorkAppSender(cfg)
+        result = sender.send_to_wechat_work_app("hello")
+
+        self.assertFalse(result)
+
+    @mock.patch("src.notification_sender.wechat_work_app_sender.time.sleep")
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.post")
+    @mock.patch("src.notification_sender.wechat_work_app_sender.requests.get")
+    def test_long_message_chunks_send_requests(self, mock_get, mock_post, _mock_sleep):
+        mock_get.return_value = _response(200, {"errcode": 0, "access_token": "T", "expires_in": 7200})
+        mock_post.return_value = _response(200, {"errcode": 0})
+        cfg = _config(
+            wechat_work_corpid="CORP",
+            wechat_work_agentid="1000002",
+            wechat_work_secret="SECRET",
+        )
+        sender = WechatWorkAppSender(cfg)
+
+        result = sender.send_to_wechat_work_app("A" * 5000)
 
         self.assertTrue(result)
         self.assertGreaterEqual(mock_post.call_count, 2)

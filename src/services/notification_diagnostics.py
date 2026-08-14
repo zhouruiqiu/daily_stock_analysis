@@ -181,6 +181,14 @@ CHANNEL_SPECS: Tuple[NotificationChannelSpec, ...] = (
         advanced_keys=("ASTRBOT_TOKEN", "WEBHOOK_VERIFY_SSL"),
     ),
     NotificationChannelSpec(
+        channel=NotificationChannel.WECHAT_WORK_APP.value,
+        display_name=ChannelDetector.get_channel_name(NotificationChannel.WECHAT_WORK_APP),
+        kind="configured",
+        minimal_keys=("WECHAT_WORK_CORPID", "WECHAT_WORK_AGENTID", "WECHAT_WORK_SECRET"),
+        advanced_keys=("WECHAT_WORK_TOUSER", "WECHAT_WORK_MSG_TYPE", "WECHAT_WORK_MAX_BYTES"),
+        note="Enterprise WeChat application message; sender IP must be in the app trusted IP allowlist (errcode 60020 otherwise).",
+    ),
+    NotificationChannelSpec(
         channel=NotificationChannel.UNKNOWN.value,
         display_name=ChannelDetector.get_channel_name(NotificationChannel.UNKNOWN),
         kind="fallback",
