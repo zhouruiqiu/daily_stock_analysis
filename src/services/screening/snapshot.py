@@ -66,6 +66,7 @@ def fetch_snapshot_with_fallback(
     sources: list[str],
     *,
     required_columns: list[str] | None = None,
+    required_snapshot_mode: str | None = None,
     fallback_snapshot_path: str | Path | None = None,
     fallback_max_age_hours: float | None = None,
     cache_ttl_seconds: float = 0.0,
@@ -81,6 +82,7 @@ def fetch_snapshot_with_fallback(
         cached = _read_last_good_snapshot(
             fallback_snapshot_path,
             required_columns=required,
+            required_snapshot_mode=required_snapshot_mode,
             source_errors=[],
             max_age_hours=cache_ttl_seconds / 3600.0,
             fresh=True,
@@ -102,6 +104,14 @@ def fetch_snapshot_with_fallback(
                     error = f"missing required columns {','.join(missing)}"
                     errors.append(f"{source}: {error}")
                     _record_source_failure(source, error)
+                    continue
+                snapshot_mode = str(df.attrs.get("snapshot_mode", "unknown")).strip().lower()
+                if required_snapshot_mode and snapshot_mode != required_snapshot_mode:
+                    error = (
+                        f"requires {required_snapshot_mode} snapshot, got "
+                        f"{snapshot_mode or 'unknown'}"
+                    )
+                    errors.append(f"{source}: {error}")
                     continue
                 df.attrs.setdefault("snapshot_source", source)
                 df.attrs["source_errors"] = list(errors)
@@ -126,6 +136,7 @@ def fetch_snapshot_with_fallback(
     cached = _read_last_good_snapshot(
         fallback_snapshot_path,
         required_columns=required,
+        required_snapshot_mode=required_snapshot_mode,
         source_errors=errors,
         max_age_hours=fallback_max_age_hours,
     )
@@ -259,6 +270,7 @@ def _write_last_good_snapshot(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "metadata": {
                 "snapshot_source": str(df.attrs.get("snapshot_source", "")),
+                "snapshot_mode": str(df.attrs.get("snapshot_mode", "unknown")),
                 "source_priority": [
                     str(source).strip()
                     for source in (source_priority or [])
@@ -282,6 +294,7 @@ def _read_last_good_snapshot(
     path_like: str | Path | None,
     *,
     required_columns: list[str],
+    required_snapshot_mode: str | None = None,
     source_errors: list[str],
     max_age_hours: float | None = None,
     fresh: bool = False,
@@ -303,6 +316,12 @@ def _read_last_good_snapshot(
         if not isinstance(metadata, dict):
             raise ValueError("missing cache metadata")
         cached_snapshot_source = str(metadata.get("snapshot_source", "")).strip()
+        cached_snapshot_mode = str(metadata.get("snapshot_mode", "unknown")).strip().lower()
+        if required_snapshot_mode and cached_snapshot_mode != required_snapshot_mode:
+            raise ValueError(
+                f"requires {required_snapshot_mode} snapshot, got "
+                f"{cached_snapshot_mode or 'unknown'}"
+            )
         if fresh and requested_snapshot_sources is not None:
             requested_priority = [
                 str(source).strip()
@@ -358,6 +377,7 @@ def _read_last_good_snapshot(
         return None
 
     cached.attrs["snapshot_source"] = "last_good_cache"
+    cached.attrs["snapshot_mode"] = str(metadata.get("snapshot_mode", "unknown"))
     cached.attrs["fallback_used"] = not fresh
     cached.attrs["cache_used"] = True
     cached.attrs["stale"] = not fresh
@@ -786,6 +806,7 @@ def _normalize(df: pd.DataFrame, source: str) -> pd.DataFrame:
         df = df[df["price"] > 0]
 
     df.attrs["snapshot_source"] = source
+    df.attrs["snapshot_mode"] = "eod" if source == "tushare" else "realtime"
     return df
 
 

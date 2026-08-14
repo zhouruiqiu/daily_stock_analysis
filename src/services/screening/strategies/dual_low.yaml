@@ -31,7 +31,6 @@ screening:
     price_max: 80
     change_pct_min: -4.5
     change_pct_max: 4.5
-  tech_weight: 0.2
   factor_weights:
     value: 0.34
     stability: 0.20

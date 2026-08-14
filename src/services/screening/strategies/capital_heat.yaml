@@ -28,7 +28,6 @@ screening:
     change_pct_max: 9.5
     price_min: 3
     price_max: 220
-  tech_weight: 0.65
   factor_weights:
     momentum: 0.32
     activity: 0.28

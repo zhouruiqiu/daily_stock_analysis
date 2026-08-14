@@ -1,0 +1,111 @@
+# Derived from AlphaSift revision 9f522747caafd3c0b1ddb7e14d5cf44c8580b6cf.
+# Licensed under Apache-2.0 and modified for daily_stock_analysis.
+# 强势题材候选策略（实验性）
+name: dragon_board
+display_name: 强势题材（实验）
+description: 基于涨幅、量能、趋势、前高位置和题材热度发现主板强势候选，不等同于连板或封板识别。
+version: "1.2"
+category: trend
+tags: [momentum, theme, hot_money, experimental]
+analysis_skills: [hot_theme, bull_trend]
+style:
+  risk_profile: aggressive
+  holding_period: short_term
+  execution_style: theme_momentum
+  market_regime: [risk_on, sector_hot, theme_active]
+  capital_profile: high_liquidity
+  ui_badge: 强势题材
+
+screening:
+  enabled: true
+  market_scope: [cn]
+  snapshot_requirements:
+    # 强势题材依赖盘中量价关系，不允许用 Tushare 日线快照替代。
+    mode: realtime
+  hard_filters:
+    exclude_st: true
+    # 成交额≥2亿，先排除流动性过低的强势脉冲。
+    amount_min: 200000000
+    # 换手≥5%，要求当日交易活跃度有基本支撑。
+    turnover_rate_min: 5.0
+    # 量比≥1.5（当日资金真实介入，非缩量）
+    volume_ratio_min: 1.5
+    # 必须有板块/行业热度数据，避免纯涨幅候选被误判为题材共振。
+    require_theme_evidence: true
+    # 保守使用主板强势涨幅窗口；这不是创业板/科创板/北交所涨停识别。
+    change_pct_min: 5.5
+    change_pct_max: 9.95
+    # 必须站上 MA20（排除下降通道里的反抽假龙头）
+    require_ma_bullish: true
+    require_price_above_ma20: true
+    signal_score_min: 65
+    macd_status_whitelist: [bullish, neutral]
+    # 使用真实 60 日收益限制阶段过热，不用 20 日振幅冒充阶段涨幅。
+    change_60d_min: 5.0
+    change_60d_max: 30.0
+    # 接近或突破前 20 日高点，并要求当日量能相对 20 日均量放大。
+    breakout_20d_pct_min: -1.0
+    volume_ratio_20d_min: 1.3
+    # 强势候选允许较高振幅，但排除失控波动、深回撤与失控 ATR。
+    range_20d_pct_max: 45.0
+    max_drawdown_20d_pct_min: -12.0
+    atr_20_pct_max: 7.0
+    daily_quality_score_min: 80.0
+  factor_weights:
+    # 题材证据与个股题材匹配合计 45%，降低单日涨幅对排名的支配。
+    momentum: 0.25
+    activity: 0.20
+    theme_heat: 0.25
+    topic_alignment: 0.20
+    liquidity: 0.10
+  scoring_profile:
+    # 缺少题材数据时不给中性分，防止未知值在排名中获得隐性奖励。
+    theme_heat_unknown_score: 15.0
+    topic_alignment_unknown_score: 10.0
+    topic_alignment_match_bonus: 30.0
+    topic_alignment_heat_weight: 0.30
+    topic_alignment_unmatched_penalty: 18.0
+    # 9.5% 以下不施加额外追高惩罚，保留强势主板候选。
+    momentum_chase_start_pct: 9.5
+    momentum_chase_penalty_slope: 6.0
+    # 理想量比放宽到 3.5（龙头放量是好事）
+    activity_ideal_volume_ratio: 3.5
+    activity_high_volume_ratio: 12.0
+    # 理想换手为 8%，超过 18% 后才开始按过热处理。
+    activity_ideal_turnover_rate: 8.0
+    activity_high_turnover_rate: 18.0
+    # 该策略面向高波动候选，因此放宽稳定性阈值。
+    stability_hot_change_pct: 9.5
+  risk_profile:
+    # 风险阈值与激进型强势题材候选的波动特征保持一致。
+    chase_change_pct: 9.92
+    abnormal_volume_ratio: 12.0
+    high_turnover_rate: 22.0
+    weak_signal_score: 55.0
+  portfolio_profile:
+    # 同题材最多 1 只，降低题材同源退潮风险。
+    max_same_bucket: 1
+    concentration_penalty: 6.0
+    buckets:
+      AI算力: [AI算力, 算力, 数据中心, 服务器, 光模块, 液冷, CPO]
+      机器人: [机器人, 减速器, 执行器, 伺服, 机器视觉]
+      半导体: [半导体, 芯片, 存储芯片, 先进封装, 半导体设备]
+      新能源: [新能源, 光伏, 锂电, 电池, 储能, 固态电池]
+      汽车: [智能驾驶, 汽车零部件, 华为汽车, 人形机器人]
+      生物医药: [创新药, CXO, 医药, 生物制品]
+      金融: [券商, 银行, 保险, 多元金融]
+      周期: [钢铁, 煤炭, 有色, 化工, 大宗商品]
+      消费: [白酒, 食品, 免税, 旅游, 美容护理]
+  scorecard_profile:
+    capital_confirmed_bonus: 3.0
+    volume_spike_ratio: 12.0
+    hot_money_activity_min: 94.0
+    hot_money_penalty: 1.0
+  ranking_hints: |
+    这是实验性的强势题材候选策略，优先关注：
+    1. 当日价格和量能同步走强，且接近或突破前 20 日高点。
+    2. 60 日涨幅尚未过热，日 K 数据质量可靠，不依赖单日孤立脉冲。
+    3. 题材热度有持续性，并有可核验的政策、订单或产业催化。
+    4. LLM 只核查题材关联、催化与风险；当前数据不包含封板时间、开板次数或连板高度。
+    5. 输出必须说明追高风险、观察条件和失效位置，不把候选直接表述为买入指令。
+  max_output: 5

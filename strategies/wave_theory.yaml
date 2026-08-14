@@ -11,11 +11,19 @@ required_tools:
   - analyze_trend
   - get_realtime_quote
 aliases: [波浪, 波浪理论, 艾略特]
-default_priority: 80
+# 弱化：波浪理论事中数浪主观性极强，10 个分析师能数出 10 种浪型，
+# AI 自动识别可靠性接近 0。降为最低优先级，仅作行情理解辅助，
+# 不作为生成买入信号的主要依据。
+default_priority: 200
 market_regimes: [volatile]
 
 instructions: |
   **波浪理论（Elliott Wave Theory）**
+
+  > ⚠️ 重要定位：本策略仅作为"事后理解行情结构"的辅助框架，
+  > **不作为独立生成买入信号的主要依据**。波浪划分在事中主观性极强，
+  > 同一走势可有多种数浪方式。实际入场决策必须由趋势/形态/情绪等
+  > 可量化策略主导，本策略只提供结构视角的参考。
 
   核心原则：市场按照 5 浪推进 + 3 浪调整的循环结构运行。
 

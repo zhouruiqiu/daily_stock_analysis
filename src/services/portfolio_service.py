@@ -1045,6 +1045,9 @@ class PortfolioService:
             if active_symbols
             else None
         )
+        name_map = self._prefetch_position_names(
+            symbol for symbol, _, _ in keys
+        )
 
         for key in sorted(keys):
             symbol, market, currency = key
@@ -1113,6 +1116,7 @@ class PortfolioService:
             position_rows.append(
                 {
                     "symbol": symbol,
+                    "name": name_map.get(symbol) or "",
                     "market": market,
                     "currency": currency,
                     "quantity": round(qty, 8),
@@ -1223,6 +1227,23 @@ class PortfolioService:
                     results[symbol] = (None, None)
 
         return results
+
+    def _prefetch_position_names(self, symbols: Iterable[str]) -> Dict[str, str]:
+        """Batch-resolve stock names for display in the portfolio table.
+
+        Returns a {symbol: name} mapping. Failures degrade to an empty dict
+        (positions just show no name); they never break the snapshot.
+        """
+        unique_symbols = sorted({s for s in symbols if s})
+        if not unique_symbols:
+            return {}
+        try:
+            from data_provider.base import DataFetcherManager
+
+            return DataFetcherManager().batch_get_stock_names(unique_symbols)
+        except Exception as exc:
+            logger.warning("Failed to prefetch portfolio position names: %s", exc)
+            return {}
 
     @staticmethod
     def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:

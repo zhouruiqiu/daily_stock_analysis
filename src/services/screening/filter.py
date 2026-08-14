@@ -36,6 +36,7 @@ _DAILY_FILTER_DEFAULTS = {
     "max_drawdown_20d_pct_max": None,
     "atr_20_pct_min": None,
     "atr_20_pct_max": None,
+    "daily_quality_score_min": None,
 }
 
 
@@ -98,6 +99,9 @@ def apply_hard_filters(df: pd.DataFrame, filters: HardFilterConfig) -> pd.DataFr
     mask = _filter_max(result, mask, ["max_drawdown_20d_pct"], filters.max_drawdown_20d_pct_max)
     mask = _filter_min(result, mask, ["atr_20_pct"], filters.atr_20_pct_min)
     mask = _filter_max(result, mask, ["atr_20_pct"], filters.atr_20_pct_max)
+    mask = _filter_min(result, mask, ["daily_quality_score"], filters.daily_quality_score_min)
+    if filters.require_theme_evidence:
+        mask &= _has_theme_evidence(result)
 
     return result.loc[mask].copy()
 
@@ -183,6 +187,9 @@ def hard_filter_rejection_summary(
     record_max("max_drawdown_20d_pct_max", ["max_drawdown_20d_pct"], filters.max_drawdown_20d_pct_max)
     record_min("atr_20_pct_min", ["atr_20_pct"], filters.atr_20_pct_min)
     record_max("atr_20_pct_max", ["atr_20_pct"], filters.atr_20_pct_max)
+    record_min("daily_quality_score_min", ["daily_quality_score"], filters.daily_quality_score_min)
+    if filters.require_theme_evidence:
+        record("require_theme_evidence", mask & _has_theme_evidence(df))
 
     return diagnostics
 
@@ -283,6 +290,13 @@ def hard_filter_waterfall(
     record_max("max_drawdown_20d_pct_max", ["max_drawdown_20d_pct"], filters.max_drawdown_20d_pct_max)
     record_min("atr_20_pct_min", ["atr_20_pct"], filters.atr_20_pct_min)
     record_max("atr_20_pct_max", ["atr_20_pct"], filters.atr_20_pct_max)
+    record_min("daily_quality_score_min", ["daily_quality_score"], filters.daily_quality_score_min)
+    if filters.require_theme_evidence:
+        record(
+            "require_theme_evidence",
+            mask & _has_theme_evidence(df),
+            ["board_heat_score", "industry_heat_score", "concept_heat_score", "board_heat_summary"],
+        )
 
     return steps
 
@@ -314,12 +328,25 @@ def requires_daily_features(filters: HardFilterConfig) -> bool:
         filters.max_drawdown_20d_pct_max is not None,
         filters.atr_20_pct_min is not None,
         filters.atr_20_pct_max is not None,
+        filters.daily_quality_score_min is not None,
     ])
 
 
 def without_daily_filters(filters: HardFilterConfig) -> HardFilterConfig:
     """Return a copy with daily K-line filters disabled."""
     return replace(filters, **_DAILY_FILTER_DEFAULTS)
+
+
+def _has_theme_evidence(df: pd.DataFrame) -> pd.Series:
+    """Return rows backed by actual board/concept heat evidence."""
+    evidence = pd.Series(False, index=df.index)
+    for column in ("board_heat_score", "industry_heat_score", "concept_heat_score"):
+        if column in df.columns:
+            evidence |= pd.to_numeric(df[column], errors="coerce").notna()
+    if "board_heat_summary" in df.columns:
+        summary = df["board_heat_summary"].fillna("").astype(str).str.strip()
+        evidence |= summary.ne("") & ~summary.str.lower().isin({"nan", "none", "<na>"})
+    return evidence
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:

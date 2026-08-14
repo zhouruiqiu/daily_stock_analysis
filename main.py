@@ -284,6 +284,7 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --check-notify     # 检查通知配置，不发送通知
   python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
   python main.py --schedule         # 启用定时任务模式
+  python main.py --intraday-watch-only  # 仅运行盘中自选盯盘
   python main.py --market-review    # 仅运行大盘复盘
         '''
     )
@@ -342,6 +343,12 @@ def parse_arguments() -> argparse.Namespace:
         '--schedule',
         action='store_true',
         help='启用定时任务模式，每日定时执行'
+    )
+
+    parser.add_argument(
+        '--intraday-watch-only',
+        action='store_true',
+        help='仅运行轻量盘中自选盯盘，不启动 Web、LLM 分析或每日调度'
     )
 
     parser.add_argument(
@@ -1365,6 +1372,16 @@ def main() -> int:
         print(format_notification_diagnostics(result))
         return 0 if result.ok else 1
 
+    if getattr(args, "intraday_watch_only", False):
+        from src.services.intraday_watch_worker import run_intraday_watch_loop
+
+        logger.info("模式: 独立盘中自选盯盘")
+        try:
+            return run_intraday_watch_loop(config_provider=_reload_runtime_config)
+        except KeyboardInterrupt:
+            logger.info("用户中断，独立盘中自选盯盘退出")
+            return 0
+
     # 解析股票列表（统一为大写 Issue #355）
     stock_codes = None
     if args.stocks:
@@ -1575,6 +1592,15 @@ def main() -> int:
                     "run_immediately": True,
                     "name": "agent_event_monitor",
                 })
+
+            from src.services.runtime_scheduler import build_intraday_watch_background_tasks
+
+            background_tasks.extend(
+                build_intraday_watch_background_tasks(
+                    config,
+                    config_provider=_reload_runtime_config,
+                )
+            )
 
             schedule_kwargs = {
                 "task": scheduled_task,

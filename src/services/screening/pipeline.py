@@ -147,11 +147,13 @@ def screen(
     snapshot_df = fetch_snapshot_with_fallback(
         config.snapshot_source_priority,
         required_columns=_required_snapshot_columns(snapshot_filters),
+        required_snapshot_mode=_required_snapshot_mode(screening.snapshot_requirements),
         fallback_snapshot_path=config.fallback_snapshot_path,
         fallback_max_age_hours=config.snapshot_fallback_max_age_hours,
         cache_ttl_seconds=config.snapshot_cache_ttl_seconds,
         market=market,
     )
+    _validate_snapshot_requirements(snapshot_df, screening.snapshot_requirements)
     effective_industry_map_files = (
         list(industry_map_files)
         if industry_map_files is not None
@@ -556,6 +558,26 @@ def screen(
         result_variant_pool_size=selection_variant.pool_size,
         result_variant_rotated_slots=selection_variant.rotated_slots,
     )
+
+
+def _validate_snapshot_requirements(
+    frame: pd.DataFrame,
+    requirements: dict[str, object],
+) -> None:
+    required_mode = str(requirements.get("mode") or "").strip().lower()
+    if not required_mode:
+        return
+    actual_mode = str(frame.attrs.get("snapshot_mode") or "unknown").strip().lower()
+    if required_mode == "realtime" and actual_mode != "realtime":
+        source = str(frame.attrs.get("snapshot_source") or "unknown")
+        raise RuntimeError(
+            f"Strategy requires realtime snapshot, got {actual_mode} from {source}"
+        )
+
+
+def _required_snapshot_mode(requirements: dict[str, object]) -> str | None:
+    mode = str(requirements.get("mode") or "").strip().lower()
+    return mode or None
 
 
 def _emit_progress(

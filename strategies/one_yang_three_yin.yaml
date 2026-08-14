@@ -9,7 +9,9 @@ core_rules: [2, 4]
 required_tools:
   - get_daily_history
   - analyze_trend
-aliases: [一阳穿三阴, 一阳夹三阴]
+aliases: [一阳夹三阴, 夹三阴]
+# 注意：本策略描述的是"夹"（大阳→3小阴→大阳），不是"穿"（单阳吞三阴）。
+# 两者是不同形态，别名不可混用，避免路由误判。
 default_priority: 110
 
 instructions: |

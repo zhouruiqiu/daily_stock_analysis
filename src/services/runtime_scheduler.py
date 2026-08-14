@@ -97,6 +97,39 @@ def build_agent_event_monitor_background_tasks(
     }]
 
 
+def build_intraday_watch_background_tasks(
+    config: Config,
+    *,
+    config_provider: Callable[[], Config],
+) -> List[Dict[str, Any]]:
+    """Build the wall-clock intraday coordinator background task."""
+    from src.services.intraday_session_scheduler import (
+        IntradaySessionCoordinator,
+        intraday_capabilities_enabled,
+    )
+
+    if not intraday_capabilities_enabled(config):
+        return []
+
+    try:
+        coordinator = IntradaySessionCoordinator(config_provider=config_provider)
+    except Exception as exc:  # pragma: no cover - defensive branch
+        logger.warning("Failed to initialize IntradaySessionCoordinator: %s", exc)
+        return []
+
+    def intraday_session_task() -> None:
+        stats = coordinator.tick()
+        if stats.get("executed"):
+            logger.info("[IntradaySession] executed: %s", ", ".join(stats["executed"]))
+
+    return [{
+        "task": intraday_session_task,
+        "interval_seconds": 30,
+        "run_immediately": True,
+        "name": "intraday_session",
+    }]
+
+
 class RuntimeSchedulerService:
     """Manage scheduled analysis inside the current API/Web/Desktop process."""
 
@@ -213,7 +246,10 @@ class RuntimeSchedulerService:
     def _current_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
         if self._background_tasks_provider is not None:
             return self._background_tasks_provider(config)
-        return self._current_agent_event_monitor_background_tasks(config)
+        tasks: List[Dict[str, Any]] = []
+        tasks.extend(self._current_agent_event_monitor_background_tasks(config))
+        tasks.extend(self._current_intraday_watch_background_tasks(config))
+        return tasks
 
     def _current_agent_event_monitor_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
         name = "agent_event_monitor"
@@ -238,6 +274,44 @@ class RuntimeSchedulerService:
             interval_seconds = int(cached["interval_seconds"])
         else:
             interval_seconds = _agent_event_monitor_interval_seconds(config)
+
+        run_immediately = (
+            bool(cached.get("run_immediately", False))
+            and name not in self._background_task_registered_names
+        )
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": interval_seconds,
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_intraday_watch_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        from src.services.intraday_session_scheduler import intraday_capabilities_enabled
+
+        name = "intraday_session"
+        if not intraday_capabilities_enabled(config):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            entries = build_intraday_watch_background_tasks(
+                config,
+                config_provider=self._reload_config,
+            )
+            if not entries:
+                self._background_task_cache.pop(name, None)
+                self._background_task_registered_names.discard(name)
+                return []
+            cached = dict(entries[0])
+            cached["name"] = name
+            self._background_task_cache[name] = cached
+            interval_seconds = int(cached["interval_seconds"])
+        else:
+            interval_seconds = 30
 
         run_immediately = (
             bool(cached.get("run_immediately", False))

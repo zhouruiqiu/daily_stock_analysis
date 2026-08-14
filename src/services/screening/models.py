@@ -48,6 +48,8 @@ class HardFilterConfig:
     max_drawdown_20d_pct_max: float | None = None
     atr_20_pct_min: float | None = None
     atr_20_pct_max: float | None = None
+    daily_quality_score_min: float | None = None
+    require_theme_evidence: bool = False
 
 
 @dataclass
@@ -57,6 +59,7 @@ class ScreeningConfig:
     hard_filters: HardFilterConfig = field(default_factory=HardFilterConfig)
     tech_weight: float = 0.35
     factor_weights: dict[str, float] = field(default_factory=dict)
+    snapshot_requirements: dict[str, object] = field(default_factory=dict)
     scoring_profile: dict[str, Any] = field(default_factory=dict)
     risk_profile: dict[str, Any] = field(default_factory=dict)
     portfolio_profile: dict[str, Any] = field(default_factory=dict)

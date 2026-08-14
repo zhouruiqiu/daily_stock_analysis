@@ -204,6 +204,60 @@ sudo systemctl status stock-analyzer
 journalctl -u stock-analyzer -f
 ```
 
+### 3.1 从本地工作区安全发布到现有 Systemd 服务
+
+如果服务器已配置好 Python 虚拟环境和 systemd 服务，可使用
+`scripts/deploy_remote.sh` 将当前本地工作区直接发布到服务器。该流程不依赖
+Git，也不会上传或覆盖远端的 `.env`、`venv/`、`data/`、`logs/`、`reports/`
+及本地 secret 文件；Web 前端在本地构建后以 `static/` 产物发布。
+
+先在本地终端提供部署参数。不要把密码写进脚本或环境变量，推荐提前配置
+SSH key；未配置 key 时由 OpenSSH 交互式询问密码。
+
+```bash
+export DSA_DEPLOY_TARGET='deploy@example.com'
+export DSA_DEPLOY_ROOT='/absolute/path/to/daily_stock_analysis'
+export DSA_DEPLOY_SERVICE='your-systemd-service'
+export DSA_DEPLOY_HEALTH_URL='http://127.0.0.1:8000/api/health'
+```
+
+先查看白名单，再执行发布：
+
+```bash
+./scripts/deploy_remote.sh --dry-run --skip-tests
+./scripts/deploy_remote.sh
+```
+
+正常发布会依次执行后端语法/flake8 检查、Web lint/build、静态资源校验、
+远端暂存校验、旧运行时代码备份、systemd 重启和健康检查。健康检查失败时，
+脚本会立即恢复本次发布前的代码备份。远端 `requirements.txt` 与本地不一致时，
+脚本会在停服务前中止；请先显式更新远端 `venv`，避免依赖变更无法自动回滚。
+
+备份位于 `${DSA_DEPLOY_ROOT}/deploy-backups/runtime-before-<deployment-id>.tar.gz`。
+需要手动回滚时，使用发布成功后输出的 deployment ID：
+
+```bash
+./scripts/deploy_remote.sh --rollback '<deployment-id>'
+```
+
+紧急发布时可用 `--skip-tests` 跳过本地 Python 与 Web 构建检查，但仍会校验现有
+`static/` 资源和远端暂存包。`--dry-run` 不发起任何网络连接。
+
+### 3.2 独立盘内自选盯盘服务
+
+Web 服务使用 `--serve-only` 时不会启动盯盘。需要盘中定时推送时，建议增加独立
+systemd 服务，并令 `ExecStart` 指向：
+
+```ini
+ExecStart=/absolute/path/to/venv/bin/python main.py --intraday-watch-only
+Restart=always
+```
+
+该服务与 Web 服务共享项目 `.env`。自选盯盘使用 `INTRADAY_WATCH_*`，
+大盘趋势监控使用 `INTRADAY_MARKET_MONITOR_*`，10:00/14:00 动态策略选股使用
+`INTRADAY_SCREENING_*`；三类能力可独立开关，推送均需配置可用的
+`NOTIFICATION_ALERT_CHANNELS`。部署代码后应同时重启 Web 与盯盘服务并检查日志。
+
 ---
 
 ## ⚙️ 配置说明

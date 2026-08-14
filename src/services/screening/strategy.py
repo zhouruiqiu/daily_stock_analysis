@@ -5,6 +5,7 @@
 
 import hashlib
 import logging
+import math
 from dataclasses import asdict, fields
 from pathlib import Path
 
@@ -36,6 +37,7 @@ _SCREENING_KEYS = {
     "hard_filters",
     "tech_weight",
     "factor_weights",
+    "snapshot_requirements",
     "scoring_profile",
     "risk_profile",
     "portfolio_profile",
@@ -109,6 +111,10 @@ _SCORING_PROFILE_KEYS = {
     "theme_heat_cooling_score_penalty_cap",
     "theme_heat_overheat_score",
     "theme_heat_overheat_penalty_slope",
+    "topic_alignment_unknown_score",
+    "topic_alignment_match_bonus",
+    "topic_alignment_heat_weight",
+    "topic_alignment_unmatched_penalty",
 }
 _RISK_PROFILE_KEYS = {
     "chase_change_pct",
@@ -186,10 +192,29 @@ _STRATEGY_DIR_CACHE: dict[
 ] = {}
 
 
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"duplicate YAML key {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
 def load_strategy(filepath: Path) -> Strategy:
     """Load a screening strategy from a YAML file."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = _load_strategy_yaml(filepath)
 
     if not isinstance(data, dict):
         raise ValueError(f"Invalid strategy file: {filepath}")
@@ -205,15 +230,23 @@ def load_strategy(filepath: Path) -> Strategy:
     if not isinstance(hf_data, dict):
         raise ValueError(f"Invalid hard_filters section in strategy file: {filepath}")
     _raise_unknown_keys(hf_data, _HARD_FILTER_KEYS, f"hard_filters section of {filepath.name}")
+    _validate_hard_filter_bounds(hf_data, filepath)
 
     hard_filters = HardFilterConfig(**hf_data)
+    factor_weights = _validated_factor_weights(screening_data, filepath)
 
     screening = ScreeningConfig(
         enabled=screening_data.get("enabled", False),
         market_scope=screening_data.get("market_scope", ["cn"]),
         hard_filters=hard_filters,
         tech_weight=screening_data.get("tech_weight", 0.35),
-        factor_weights=screening_data.get("factor_weights", {}),
+        factor_weights=factor_weights,
+        snapshot_requirements=_optional_mapping(
+            screening_data,
+            "snapshot_requirements",
+            filepath,
+            allowed_keys={"mode"},
+        ),
         scoring_profile=_optional_mapping(
             screening_data, "scoring_profile", filepath, allowed_keys=_SCORING_PROFILE_KEYS
         ),
@@ -245,6 +278,68 @@ def load_strategy(filepath: Path) -> Strategy:
         screening=screening,
     )
 
+
+def _load_strategy_yaml(filepath: Path) -> object:
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return yaml.load(f, Loader=_UniqueKeySafeLoader)
+    except ValueError as exc:
+        raise ValueError(f"Invalid strategy file {filepath.name}: {exc}") from exc
+
+
+def _validate_hard_filter_bounds(hard_filters: dict, filepath: Path) -> None:
+    for min_key, min_value in hard_filters.items():
+        if not min_key.endswith("_min") or min_value is None:
+            continue
+        base_name = min_key[:-4]
+        max_key = f"{base_name}_max"
+        max_value = hard_filters.get(max_key)
+        if max_value is None:
+            continue
+        try:
+            minimum = float(min_value)
+            maximum = float(max_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid {base_name} min/max in strategy file {filepath.name}: values must be numeric"
+            ) from exc
+        if minimum > maximum:
+            raise ValueError(
+                f"Invalid {base_name} range in strategy file {filepath.name}: "
+                f"min {minimum:g} exceeds max {maximum:g}"
+            )
+
+
+def _validated_factor_weights(screening_data: dict, filepath: Path) -> dict[str, float]:
+    raw_weights = screening_data.get("factor_weights", {})
+    if not isinstance(raw_weights, dict):
+        raise ValueError(f"Invalid factor_weights in strategy file {filepath.name}: expected a mapping")
+
+    weights: dict[str, float] = {}
+    for factor, raw_value in raw_weights.items():
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid factor_weights in strategy file {filepath.name}: "
+                f"weight for {factor!r} must be numeric"
+            ) from exc
+        if not math.isfinite(value):
+            raise ValueError(
+                f"Invalid factor_weights in strategy file {filepath.name}: "
+                f"weight for {factor!r} must be finite"
+            )
+        if value < 0:
+            raise ValueError(
+                f"Invalid factor_weights in strategy file {filepath.name}: weights must be non-negative"
+            )
+        weights[str(factor)] = value
+
+    if weights and not any(value > 0 for value in weights.values()):
+        raise ValueError(
+            f"Invalid factor_weights in strategy file {filepath.name}: at least one weight must be positive"
+        )
+    return weights
 
 def load_all_strategies(strategies_dir: Path) -> dict[str, Strategy]:
     """Load all strategies from a directory."""
@@ -852,6 +947,7 @@ def _required_daily_fields(filters_config: HardFilterConfig) -> list[str]:
             or filters_config.max_drawdown_20d_pct_max is not None,
         ),
         ("atr_20_pct", filters_config.atr_20_pct_min is not None or filters_config.atr_20_pct_max is not None),
+        ("daily_quality_score", filters_config.daily_quality_score_min is not None),
     ]
     return [field for field, enabled in checks if enabled]
 

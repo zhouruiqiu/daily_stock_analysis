@@ -3,8 +3,8 @@
 # 超跌反转策略
 name: oversold_reversal
 display_name: 超跌反转
-description: 跌幅可控、流动性仍在、具备修复观察价值的反转候选
-version: "1.1"
+description: 60日阶段下跌、RSI超卖且风险仍受控的修复观察候选，不代表已经确认反转
+version: "1.2"
 category: reversal
 tags: [reversal, oversold, repair]
 analysis_skills: [bottom_volume]
@@ -25,13 +25,19 @@ screening:
     turnover_rate_min: 1.0
     change_pct_min: -8.0
     change_pct_max: -1.0
+    change_60d_min: -35.0
+    change_60d_max: -8.0
+    rsi_status_whitelist: [oversold]
+    volatility_20d_pct_max: 55.0
+    max_drawdown_20d_pct_min: -30.0
+    atr_20_pct_max: 8.0
+    daily_quality_score_min: 80.0
     pe_ttm_min: 0
     pe_ttm_max: 80
     pb_min: 0
     pb_max: 8.0
     price_min: 3
     price_max: 180
-  tech_weight: 0.45
   factor_weights:
     reversal: 0.40
     stability: 0.20
@@ -67,7 +73,8 @@ screening:
     volume_spike_ratio: 5.5
   ranking_hints: |
     优先关注：
-    1. 下跌幅度可控、不是基本面或退市风险驱动的连续杀跌
+    1. 60 日阶段跌幅和 RSI 超卖同时成立，且波动、回撤与 ATR 没有失控
     2. 成交额和换手仍能支撑后续修复，避免流动性塌陷
-    3. 若存在错杀、事件落地或板块修复线索，可提高优先级
+    3. 优先等待止跌或重新站回短期均线确认，不把超卖本身当作买入信号
+    4. 若下跌来自基本面恶化、退市风险或持续减持，应降权或排除
   max_output: 5

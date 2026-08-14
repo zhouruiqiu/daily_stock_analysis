@@ -2,18 +2,18 @@
 # Licensed under Apache-2.0 and modified for daily_stock_analysis.
 # 蓝筹收益质量策略
 name: blue_chip_income
-display_name: 蓝筹收益质量
-description: 面向高流动性大盘蓝筹的收益质量候选，强调合理估值、稳定成交和防守型持有体验
-version: "1.0"
-category: income
-tags: [value, quality, income, blue_chip, defensive, snapshot_only]
+display_name: 大盘低估值防守
+description: 面向高流动性大盘股的低估值防守候选，依据市值、PE/PB和交易稳定性筛选
+version: "1.1"
+category: value
+tags: [value, blue_chip, defensive, snapshot_only]
 style:
   risk_profile: defensive
   holding_period: watchlist
-  execution_style: income_quality
+  execution_style: large_cap_value
   market_regime: [risk_off, range_bound, low_rate]
   capital_profile: high_liquidity
-  ui_badge: 蓝筹收益
+  ui_badge: 大盘价值
 
 screening:
   enabled: true
@@ -32,7 +32,6 @@ screening:
     change_pct_max: 4.0
     price_min: 3
     price_max: 180
-  tech_weight: 0.18
   factor_weights:
     value: 0.30
     stability: 0.26
@@ -78,7 +77,7 @@ screening:
     volume_spike_penalty: 1.5
   ranking_hints: |
     优先关注：
-    1. 大市值、高成交额且估值没有明显透支的蓝筹或红利资产
+    1. 大市值、高成交额且 PE/PB 没有明显透支的防守候选
     2. 成交与换手稳定，不依赖单日脉冲量能或短线题材拉升
-    3. 行业地位、现金流、分红稳定性或防守属性能解释持有逻辑
+    3. 股息、现金流、ROE 和负债需要后续深度分析核查，不属于本策略硬条件
   max_output: 5
