@@ -16,6 +16,8 @@ from src.services.screening_service import ScreeningService
 from src.services.task_queue import TaskStatus as QueueTaskStatus
 from src.services.task_queue import get_task_queue
 from src.storage import DatabaseManager
+from src.services.strategy_evaluation_service import StrategyEvaluationService
+from src.services.strategy_outcome_service import StrategyOutcomeService
 
 router = APIRouter()
 
@@ -76,6 +78,43 @@ def _screening_task_not_found(task_id: str) -> HTTPException:
 @router.get("/status")
 def screening_status(config: Config = Depends(get_config_dep)) -> Dict[str, Any]:
     return _service(config).status()
+
+
+@router.get("/evaluation/status")
+def strategy_evaluation_status(config: Config = Depends(get_config_dep), db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    runs=db.list_strategy_evaluation_runs(limit=1)
+    return {"enabled":bool(config.strategy_evaluation_enabled),"time":config.strategy_evaluation_time,"top_n":config.strategy_evaluation_top_n,"horizons":config.strategy_evaluation_horizons,"latest_run":runs[0] if runs else None}
+
+
+@router.get("/evaluation/runs")
+def strategy_evaluation_runs(limit: int = Query(30,ge=1,le=365), db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    items=db.list_strategy_evaluation_runs(limit=limit)
+    return {"items":items,"count":len(items)}
+
+
+@router.get("/evaluation/runs/{run_id}")
+def strategy_evaluation_run_detail(run_id: str, db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    run=db.get_strategy_evaluation_run(run_id)
+    if run is None: raise api_error(404,"strategy_evaluation_run_not_found","评测批次不存在")
+    return {**run,"picks":db.list_strategy_evaluation_picks(run_id=run_id)}
+
+
+@router.get("/evaluation/leaderboard")
+def strategy_evaluation_leaderboard(horizon: str = Query("5d",pattern="^(1d|3d|5d)$"), window: int = Query(20,ge=5,le=120), db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    return StrategyOutcomeService(db_manager=db).get_leaderboard(horizon,window=window)
+
+
+@router.get("/evaluation/strategies/{strategy}/history")
+def strategy_evaluation_strategy_history(strategy: str, db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    items=db.list_strategy_evaluation_picks(strategy=strategy)
+    return {"strategy":strategy,"items":items,"count":len(items)}
+
+
+@router.post("/evaluation/run-now")
+def strategy_evaluation_run_now(config: Config = Depends(get_config_dep), db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
+    if not config.strategy_evaluation_enabled: raise api_error(409,"strategy_evaluation_disabled","策略评测尚未启用")
+    from datetime import date
+    return StrategyEvaluationService(db_manager=db,top_n=config.strategy_evaluation_top_n,benchmark_code=config.strategy_evaluation_benchmark).run_daily(date.today())
 
 
 @router.get("/strategies")

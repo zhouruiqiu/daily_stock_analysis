@@ -19,9 +19,14 @@ class IntradaySessionConfigTest(TestCase):
             "INTRADAY_MARKET_MONITOR_ENABLED": "true",
             "INTRADAY_MARKET_MONITOR_INTERVAL_MINUTES": "10",
             "INTRADAY_MARKET_TREND_THRESHOLD_PCT": "0.35",
+            "INTRADAY_MARKET_DROP_ALERT_PCT": "1.5",
             "INTRADAY_SCREENING_ENABLED": "true",
             "INTRADAY_SCREENING_TIMES": "14:00,10:00,14:00,invalid",
             "INTRADAY_SCREENING_MAX_RESULTS": "5",
+            "STRATEGY_EVALUATION_ENABLED": "true",
+            "STRATEGY_EVALUATION_TIME": "09:25",
+            "STRATEGY_EVALUATION_TOP_N": "5",
+            "STRATEGY_EVALUATION_HORIZONS": "5,1,3,3",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -30,9 +35,14 @@ class IntradaySessionConfigTest(TestCase):
         self.assertTrue(config.intraday_market_monitor_enabled)
         self.assertEqual(config.intraday_market_monitor_interval_minutes, 10)
         self.assertEqual(config.intraday_market_trend_threshold_pct, 0.35)
+        self.assertEqual(config.intraday_market_drop_alert_pct, 1.5)
         self.assertTrue(config.intraday_screening_enabled)
         self.assertEqual(config.intraday_screening_times, ["10:00", "14:00"])
         self.assertEqual(config.intraday_screening_max_results, 5)
+        self.assertTrue(config.strategy_evaluation_enabled)
+        self.assertEqual(config.strategy_evaluation_time, "09:25")
+        self.assertEqual(config.strategy_evaluation_top_n, 5)
+        self.assertEqual(config.strategy_evaluation_horizons, [1, 3, 5])
 
 
 class _MarketMonitor:
@@ -49,8 +59,8 @@ class _ScreeningWorker:
     def __init__(self, events):
         self.events = events
 
-    def run_once(self, state, now):
-        self.events.append(("screening", now.strftime("%H:%M"), state.value))
+    def run_once(self, state, now, *, strategy=None):
+        self.events.append(("screening", now.strftime("%H:%M"), state.value, strategy))
         return {"selected": 1}
 
 
@@ -125,7 +135,7 @@ def test_same_slot_runs_once_and_1000_order_is_market_screening_watch() -> None:
 
     assert events == [
         ("market", "10:00"),
-        ("screening", "10:00", "sustained_up"),
+        ("screening", "10:00", "sustained_up", None),
         ("watch", "10:00"),
     ]
 
@@ -139,6 +149,18 @@ def test_screening_only_runs_at_configured_1000_and_1400_slots() -> None:
 
     screening_times = [event[1] for event in events if event[0] == "screening"]
     assert screening_times == ["10:00", "14:00"]
+
+
+def test_0945_opening_slot_runs_dragon_board_once() -> None:
+    events = []
+    coordinator = _coordinator(events, state=MarketTrendState.NEUTRAL)
+
+    coordinator.tick(datetime(2026, 8, 14, 9, 45, 1))
+    coordinator.tick(datetime(2026, 8, 14, 9, 45, 45))
+
+    assert [event for event in events if event[0] == "screening"] == [
+        ("screening", "09:45", "neutral", "dragon_board"),
+    ]
 
 
 def test_non_trading_day_runs_no_intraday_tasks() -> None:

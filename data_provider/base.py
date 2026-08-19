@@ -2460,8 +2460,13 @@ class DataFetcherManager:
         logger.info(f"[股票名称] 批量获取完成，成功 {len(result)}/{len(stock_codes)}")
         return result
 
-    def get_main_indices(self, region: str = "cn") -> List[Dict[str, Any]]:
-        """获取主要指数实时行情（自动切换数据源）"""
+    def get_main_indices(
+        self,
+        region: str = "cn",
+        *,
+        require_realtime: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """获取主要指数行情；盘中监控可排除历史日线型数据源。"""
         if region == "cn":
             tickflow_fetcher = self._get_tickflow_fetcher()
             if tickflow_fetcher is not None:
@@ -2475,6 +2480,9 @@ class DataFetcherManager:
 
         for fetcher in self._fetchers:
             if region == "cn" and fetcher.name == "TickFlowFetcher":
+                continue
+            if require_realtime and fetcher.name == "TushareFetcher":
+                logger.info("[%s] 仅提供指数日线，实时指数请求跳过", fetcher.name)
                 continue
             try:
                 data = fetcher.get_main_indices(region=region)

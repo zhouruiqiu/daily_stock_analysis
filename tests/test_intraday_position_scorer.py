@@ -105,3 +105,32 @@ def test_normalize_position_symbol_matches_a_share_suffixes():
     assert normalize_position_symbol("600036.SH") == "600036"
     assert normalize_position_symbol("sz301047") == "301047"
     assert normalize_position_symbol("300136") == "300136"
+
+
+def test_held_stock_below_nearest_support_exposes_breach_fields():
+    result = IntradayPositionScorer().score(
+        _trend(support_levels=[40.2, 39.0], current_price=39.8),
+        SimpleNamespace(price=39.8, change_pct=-2.0),
+        {"symbol": "600036", "avg_cost": 40.0, "quantity": 600},
+    )
+
+    assert result.nearest_support == 40.2
+    assert result.support_breached is True
+    assert result.support_break_pct == 1.0
+
+
+def test_support_breach_requires_held_position_and_realtime_price():
+    trend = _trend(support_levels=[40.2, 39.0], current_price=39.0)
+
+    watchlist = IntradayPositionScorer().score(
+        trend,
+        SimpleNamespace(price=39.8, change_pct=-2.0),
+    )
+    missing_realtime = IntradayPositionScorer().score(
+        trend,
+        None,
+        {"symbol": "600036", "avg_cost": 40.0, "quantity": 600},
+    )
+
+    assert watchlist.support_breached is False
+    assert missing_realtime.support_breached is False

@@ -104,6 +104,23 @@ class TestTickFlowMarketReviewFallback(unittest.TestCase):
         self.assertEqual(data, [{"code": "^GSPC"}])
         self.assertEqual(fallback.index_calls, 1)
 
+    def test_realtime_indices_skip_tushare_historical_snapshot(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        tushare = _DummyFetcher("TushareFetcher", indices=[{"code": "stale"}])
+        realtime = _DummyFetcher("EfinanceFetcher", indices=[{"code": "live"}])
+        manager._fetchers = [tushare, realtime]
+        manager._get_tickflow_fetcher = lambda: None
+
+        data = DataFetcherManager.get_main_indices(
+            manager,
+            region="cn",
+            require_realtime=True,
+        )
+
+        self.assertEqual(data, [{"code": "live"}])
+        self.assertEqual(tushare.index_calls, 0)
+        self.assertEqual(realtime.index_calls, 1)
+
     def test_manager_falls_back_when_tickflow_market_stats_fails(self):
         manager = DataFetcherManager.__new__(DataFetcherManager)
         fallback = _DummyFetcher(

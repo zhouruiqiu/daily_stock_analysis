@@ -239,7 +239,13 @@ class IntradayWatchWorker:
             "━" * 16,
             "",
         ]
-        for item in items:
+        ordered_items = sorted(
+            items,
+            key=lambda item: not bool(
+                getattr(item.get("score"), "support_breached", False)
+            ),
+        )
+        for item in ordered_items:
             lines.append(self._format_one_stock(item))
             lines.append("")
         return "\n".join(lines).rstrip()
@@ -275,9 +281,18 @@ class IntradayWatchWorker:
         support = self._fmt_levels(getattr(trend, "support_levels", []))
         resistance = self._fmt_levels(getattr(trend, "resistance_levels", []))
 
-        parts: List[str] = [f"{name} {code}"]
         score = item.get("score")
+        breached = bool(getattr(score, "support_breached", False))
+        parts: List[str] = [
+            f"🚨【跌破支撑】{name} {code}" if breached else f"{name} {code}"
+        ]
         if score is not None:
+            if breached:
+                parts.append(
+                    f"⚠️ 现价 {_fmt_num(price)} < 最近支撑 "
+                    f"{_fmt_num(score.nearest_support)}（跌破 "
+                    f"{_fmt_num(score.support_break_pct, '.2f')}%）"
+                )
             identity = "持仓" if score.is_held else "自选观察"
             parts.append(
                 f"综合评分 {score.score}/100 · {identity} · "

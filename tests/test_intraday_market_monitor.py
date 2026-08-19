@@ -9,11 +9,11 @@ from src.services.intraday_market_monitor import (
 )
 
 
-def _rows(sh: float, sz: float, cyb: float):
+def _rows(sh: float, sz: float, cyb: float, *, change_pct: float = 0.0):
     return [
-        {"code": "sh000001", "name": "上证指数", "current": sh, "change_pct": 0.0},
-        {"code": "sz399001", "name": "深证成指", "current": sz, "change_pct": 0.0},
-        {"code": "sz399006", "name": "创业板指", "current": cyb, "change_pct": 0.0},
+        {"code": "sh000001", "name": "上证指数", "current": sh, "change_pct": change_pct},
+        {"code": "sz399001", "name": "深证成指", "current": sz, "change_pct": change_pct},
+        {"code": "sz399006", "name": "创业板指", "current": cyb, "change_pct": change_pct},
     ]
 
 
@@ -93,6 +93,27 @@ def test_three_falling_samples_enter_sustained_down() -> None:
     result = monitor.run_once(datetime(2026, 8, 14, 10, 20))
 
     assert result.state is MarketTrendState.SUSTAINED_DOWN
+
+
+def test_large_daily_drop_alerts_on_first_sample_without_monotonic_sequence() -> None:
+    notifier = _Notifier()
+    monitor = IntradayMarketMonitor(
+        index_provider=lambda: _rows(2950, 9700, 1900, change_pct=-2.0),
+        notifier=notifier,
+        threshold_pct=0.35,
+        drop_alert_pct=1.5,
+    )
+
+    result = monitor.run_once(datetime(2026, 8, 14, 9, 30))
+
+    assert result.state is MarketTrendState.SUSTAINED_DOWN
+    assert result.daily_changes == {
+        "上证指数": -2.0,
+        "深证成指": -2.0,
+        "创业板指": -2.0,
+    }
+    assert len(notifier.messages) == 1
+    assert "相对昨收大幅下跌" in notifier.messages[0][0]
 
 
 def test_below_threshold_and_insufficient_indices_stay_neutral() -> None:

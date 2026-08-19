@@ -15,6 +15,9 @@ class IntradayPositionScore:
     avg_cost: Optional[float] = None
     pnl_pct: Optional[float] = None
     defense_price: Optional[float] = None
+    nearest_support: Optional[float] = None
+    support_breached: bool = False
+    support_break_pct: Optional[float] = None
     positive_reasons: List[str] = field(default_factory=list)
     negative_reasons: List[str] = field(default_factory=list)
 
@@ -55,6 +58,10 @@ class IntradayPositionScorer:
         position_points, avg_cost, pnl_pct, defense, pos_good, pos_bad = (
             self._position_score(trend, quote, position or {})
         )
+        nearest_support, support_breached, support_break_pct = self._support_breach(
+            trend,
+            quote,
+        )
         score = self._clamp(technical + position_points)
         return IntradayPositionScore(
             score=score,
@@ -66,6 +73,9 @@ class IntradayPositionScorer:
             avg_cost=avg_cost,
             pnl_pct=pnl_pct,
             defense_price=defense,
+            nearest_support=nearest_support,
+            support_breached=support_breached,
+            support_break_pct=support_break_pct,
             positive_reasons=(positive + pos_good)[:3],
             negative_reasons=(negative + pos_bad)[:3],
         )
@@ -179,8 +189,33 @@ class IntradayPositionScorer:
         defense = round(max(defense_candidates), 2) if defense_candidates else None
         if defense is not None and price is not None and price < defense:
             score -= 5
-            bad.append("现价跌破成本防守位")
+            bad.append("现价跌破防守位")
         return max(0, min(30, round(score))), avg_cost, pnl_pct, defense, good, bad
+
+    def _support_breach(
+        self,
+        trend: Any,
+        quote: Any,
+    ) -> Tuple[Optional[float], bool, Optional[float]]:
+        supports = [
+            self._float(value)
+            for value in list(getattr(trend, "support_levels", []) or [])[:2]
+        ]
+        supports = [value for value in supports if value is not None and value > 0]
+        nearest_support = round(max(supports), 2) if supports else None
+        realtime_price = self._float(getattr(quote, "price", None))
+        if (
+            nearest_support is None
+            or realtime_price is None
+            or realtime_price <= 0
+            or realtime_price >= nearest_support
+        ):
+            return nearest_support, False, None
+        break_pct = round(
+            (nearest_support - realtime_price) / nearest_support * 100,
+            2,
+        )
+        return nearest_support, True, break_pct
 
     @staticmethod
     def _hold_recommendation(score: int) -> str:

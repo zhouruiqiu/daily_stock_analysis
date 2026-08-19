@@ -9,6 +9,7 @@ import os
 import sys
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -19,6 +20,7 @@ from src.services.intraday_watch_worker import (
     IntradayWatchWorker,
     run_intraday_watch_loop,
 )
+from src.services.intraday_position_scorer import IntradayPositionScore
 from src.stock_analyzer import TrendAnalysisResult
 
 
@@ -48,6 +50,48 @@ def _ok_dispatch():
 
 class TestIntradayWatchWorker(unittest.TestCase):
 
+    def test_breached_holding_is_sorted_first_and_highlighted(self):
+        worker = IntradayWatchWorker()
+        normal_score = IntradayPositionScore(
+            score=70,
+            recommendation="继续持有",
+            risk_level="低",
+            is_held=True,
+            technical_score=50,
+        )
+        breach_score = IntradayPositionScore(
+            score=42,
+            recommendation="考虑减仓",
+            risk_level="高",
+            is_held=True,
+            technical_score=30,
+            nearest_support=40.2,
+            support_breached=True,
+            support_break_pct=1.0,
+        )
+        items = [
+            {
+                "code": "000001",
+                "trend": TrendAnalysisResult(code="000001"),
+                "quote": SimpleNamespace(name="平安银行", price=10.0),
+                "score": normal_score,
+            },
+            {
+                "code": "600036",
+                "trend": TrendAnalysisResult(code="600036"),
+                "quote": SimpleNamespace(name="招商银行", price=39.8),
+                "score": breach_score,
+            },
+        ]
+
+        content = worker._format_intraday_watch(
+            "cn", MarketPhase.INTRADAY, items, now=datetime(2026, 8, 14, 10, 0)
+        )
+
+        assert content.index("600036") < content.index("000001")
+        assert "🚨【跌破支撑】招商银行 600036" in content
+        assert "现价 39.80 < 最近支撑 40.20（跌破 1.00%）" in content
+
     def test_disabled_skips_without_doing_anything(self):
         worker = IntradayWatchWorker()  # 默认 intraday_watch_enabled=False
         stats = worker.run_once()
@@ -62,7 +106,7 @@ class TestIntradayWatchWorker(unittest.TestCase):
         fetcher = mock.MagicMock()
         worker = IntradayWatchWorker(config_provider=lambda: cfg, fetcher_manager=fetcher)
 
-        stats = worker.run_once()
+        stats = worker.run_once(now=datetime(2026, 8, 14, 16, 0))
 
         self.assertEqual(stats["skipped"], 1)
         self.assertEqual(stats["analyzed"], 0)

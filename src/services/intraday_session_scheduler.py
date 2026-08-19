@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ACTIVE_PHASES = {MarketPhase.INTRADAY, MarketPhase.CLOSING_AUCTION}
+_OPENING_SCREENING_TIME = "09:45"
+_OPENING_SCREENING_STRATEGY = "dragon_board"
 
 
 def intraday_capabilities_enabled(config: Any) -> bool:
@@ -23,6 +25,7 @@ def intraday_capabilities_enabled(config: Any) -> bool:
         getattr(config, "intraday_watch_enabled", False)
         or getattr(config, "intraday_market_monitor_enabled", False)
         or getattr(config, "intraday_screening_enabled", False)
+        or getattr(config, "strategy_evaluation_enabled", False)
     )
 
 
@@ -49,6 +52,7 @@ class IntradaySessionCoordinator:
         self._claim_date: Optional[str] = None
         self._screening_running = False
         self._watch_running = False
+        self._strategy_evaluation_scheduler = None
         self._running_lock = threading.Lock()
 
     @staticmethod
@@ -84,6 +88,7 @@ class IntradaySessionCoordinator:
 
             self.market_monitor = IntradayMarketMonitor(
                 threshold_pct=getattr(config, "intraday_market_trend_threshold_pct", 0.35),
+                drop_alert_pct=getattr(config, "intraday_market_drop_alert_pct", 1.5),
                 notifications_enabled=getattr(
                     config, "intraday_market_monitor_enabled", False
                 ),
@@ -92,6 +97,9 @@ class IntradaySessionCoordinator:
             threshold = getattr(config, "intraday_market_trend_threshold_pct", None)
             if threshold is not None and hasattr(self.market_monitor, "threshold_pct"):
                 self.market_monitor.threshold_pct = max(float(threshold), 0.0)
+            drop_threshold = getattr(config, "intraday_market_drop_alert_pct", None)
+            if drop_threshold is not None and hasattr(self.market_monitor, "drop_alert_pct"):
+                self.market_monitor.drop_alert_pct = max(float(drop_threshold), 0.0)
             if hasattr(self.market_monitor, "notifications_enabled"):
                 self.market_monitor.notifications_enabled = bool(
                     getattr(config, "intraday_market_monitor_enabled", False)
@@ -111,6 +119,12 @@ class IntradaySessionCoordinator:
         result: Dict[str, Any] = {"executed": [], "phase": "unknown"}
         if not intraday_capabilities_enabled(config):
             return result
+        if getattr(config, "strategy_evaluation_enabled", False):
+            if self._strategy_evaluation_scheduler is None:
+                from src.services.strategy_evaluation_scheduler import StrategyEvaluationScheduler
+                self._strategy_evaluation_scheduler = StrategyEvaluationScheduler(config_provider=self.config_provider)
+            evaluation_result = self._strategy_evaluation_scheduler.tick(current)
+            result["executed"].extend(evaluation_result.get("executed", []))
         self._ensure_components(config)
 
         phase = self.phase_provider(current)
@@ -145,10 +159,17 @@ class IntradaySessionCoordinator:
                     logger.exception("[IntradaySession] market sample failed: %s", exc)
 
         screening_times = set(getattr(config, "intraday_screening_times", None) or ["10:00", "14:00"])
-        screening_due = screening_enabled and current.strftime("%H:%M") in screening_times
-        if screening_due and phase in _ACTIVE_PHASES:
+        current_time = current.strftime("%H:%M")
+        opening_screening_due = screening_enabled and current_time == _OPENING_SCREENING_TIME
+        screening_due = screening_enabled and current_time in screening_times
+        if (opening_screening_due or screening_due) and phase in _ACTIVE_PHASES:
             key = self._slot_key("screening", current)
-            if self._claim(key) and self._launch_screening(market_state, current):
+            strategy = _OPENING_SCREENING_STRATEGY if opening_screening_due else None
+            if self._claim(key) and self._launch_screening(
+                market_state,
+                current,
+                strategy=strategy,
+            ):
                 result["executed"].append("screening")
 
         watch_due = bool(getattr(config, "intraday_watch_enabled", False)) and self._is_interval_slot(
@@ -193,7 +214,13 @@ class IntradaySessionCoordinator:
         self._claimed_slots.add(key)
         return True
 
-    def _launch_screening(self, state: MarketTrendState, current: datetime) -> bool:
+    def _launch_screening(
+        self,
+        state: MarketTrendState,
+        current: datetime,
+        *,
+        strategy: Optional[str] = None,
+    ) -> bool:
         with self._running_lock:
             if self._screening_running:
                 logger.warning("[IntradaySession] screening still running; skip slot %s", current)
@@ -202,7 +229,7 @@ class IntradaySessionCoordinator:
 
         def run() -> None:
             try:
-                self.screening_worker.run_once(state, current)
+                self.screening_worker.run_once(state, current, strategy=strategy)
             finally:
                 with self._running_lock:
                     self._screening_running = False

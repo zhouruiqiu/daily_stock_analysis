@@ -110,6 +110,34 @@ def test_zero_candidates_still_notifies_completed_run() -> None:
     assert "本次没有符合条件的股票" in notifier.messages[0][0]
 
 
+def test_explicit_opening_strategy_uses_dragon_board_reason() -> None:
+    notifier = _Notifier()
+    service = _ScreeningService({
+        "candidates": [],
+        "candidate_count": 0,
+        "snapshot_source": "sina",
+        "llm_ranked": False,
+        "degradation": [],
+    })
+    worker = IntradayScreeningWorker(
+        config_provider=lambda: _config(),
+        screening_service=service,
+        notifier=notifier,
+    )
+
+    worker.run_once(
+        MarketTrendState.NEUTRAL,
+        datetime(2026, 8, 14, 9, 45),
+        strategy="dragon_board",
+    )
+
+    assert service.calls == [
+        {"strategy": "dragon_board", "market": "cn", "max_results": 5},
+    ]
+    assert "本次策略：强势题材" in notifier.messages[0][0]
+    assert "开盘后观察强势题材" in notifier.messages[0][0]
+
+
 def test_screening_exception_is_isolated_and_reported() -> None:
     notifier = _Notifier()
     worker = IntradayScreeningWorker(

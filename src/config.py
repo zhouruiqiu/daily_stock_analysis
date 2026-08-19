@@ -323,6 +323,19 @@ def parse_env_float(
     return parsed
 
 
+def _parse_strategy_evaluation_horizons(value: Optional[str]) -> List[int]:
+    raw_items = [item.strip() for item in str(value or "").split(",") if item.strip()]
+    if not raw_items:
+        raise ValueError("STRATEGY_EVALUATION_HORIZONS must not be empty")
+    try:
+        horizons = sorted({int(item) for item in raw_items})
+    except ValueError as exc:
+        raise ValueError("STRATEGY_EVALUATION_HORIZONS must contain integers") from exc
+    if not set(horizons).issubset({1, 3, 5}):
+        raise ValueError("STRATEGY_EVALUATION_HORIZONS only supports 1,3,5")
+    return horizons
+
+
 def normalize_news_strategy_profile(value: Optional[str]) -> str:
     """Normalize news strategy profile to known values."""
     candidate = (value or "short").strip().lower()
@@ -1214,9 +1227,17 @@ class Config:
     intraday_market_monitor_enabled: bool = False
     intraday_market_monitor_interval_minutes: int = 10
     intraday_market_trend_threshold_pct: float = 0.35
+    intraday_market_drop_alert_pct: float = 1.5
     intraday_screening_enabled: bool = False
     intraday_screening_times: List[str] = field(default_factory=lambda: ["10:00", "14:00"])
     intraday_screening_max_results: int = 5
+    strategy_evaluation_enabled: bool = False
+    strategy_evaluation_time: str = "09:25"
+    strategy_evaluation_top_n: int = 5
+    strategy_evaluation_horizons: List[int] = field(default_factory=lambda: [1, 3, 5])
+    strategy_evaluation_benchmark: str = "000300"
+    strategy_evaluation_daily_notify: bool = True
+    strategy_evaluation_weekly_notify: bool = True
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2212,6 +2233,12 @@ class Config:
                 field_name='INTRADAY_MARKET_TREND_THRESHOLD_PCT',
                 minimum=0.0,
             ),
+            intraday_market_drop_alert_pct=parse_env_float(
+                os.getenv('INTRADAY_MARKET_DROP_ALERT_PCT'),
+                1.5,
+                field_name='INTRADAY_MARKET_DROP_ALERT_PCT',
+                minimum=0.0,
+            ),
             intraday_screening_enabled=parse_env_bool(
                 os.getenv('INTRADAY_SCREENING_ENABLED'),
                 default=False,
@@ -2226,6 +2253,31 @@ class Config:
                 field_name='INTRADAY_SCREENING_MAX_RESULTS',
                 minimum=1,
                 maximum=20,
+            ),
+            strategy_evaluation_enabled=parse_env_bool(
+                os.getenv('STRATEGY_EVALUATION_ENABLED'), default=False,
+            ),
+            strategy_evaluation_time=(
+                normalize_schedule_times(
+                    os.getenv('STRATEGY_EVALUATION_TIME', '09:25'),
+                    fallback_time='09:25',
+                )[0]
+            ),
+            strategy_evaluation_top_n=parse_env_int(
+                os.getenv('STRATEGY_EVALUATION_TOP_N'), 5,
+                field_name='STRATEGY_EVALUATION_TOP_N', minimum=1, maximum=20,
+            ),
+            strategy_evaluation_horizons=_parse_strategy_evaluation_horizons(
+                os.getenv('STRATEGY_EVALUATION_HORIZONS', '1,3,5')
+            ),
+            strategy_evaluation_benchmark=(
+                os.getenv('STRATEGY_EVALUATION_BENCHMARK', '000300').strip() or '000300'
+            ),
+            strategy_evaluation_daily_notify=parse_env_bool(
+                os.getenv('STRATEGY_EVALUATION_DAILY_NOTIFY'), default=True,
+            ),
+            strategy_evaluation_weekly_notify=parse_env_bool(
+                os.getenv('STRATEGY_EVALUATION_WEEKLY_NOTIFY'), default=True,
             ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),

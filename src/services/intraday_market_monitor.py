@@ -27,6 +27,7 @@ class MarketTrendSnapshot:
     sample_count: int
     valid_index_count: int
     cumulative_changes: Dict[str, float]
+    daily_changes: Dict[str, float]
     sampled_at: datetime
 
 
@@ -45,11 +46,13 @@ class IntradayMarketMonitor:
         index_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
         notifier: Optional[Any] = None,
         threshold_pct: float = 0.35,
+        drop_alert_pct: float = 1.5,
         notifications_enabled: bool = True,
     ) -> None:
         self._index_provider = index_provider
         self._notifier = notifier
         self.threshold_pct = max(float(threshold_pct), 0.0)
+        self.drop_alert_pct = max(float(drop_alert_pct), 0.0)
         self.notifications_enabled = bool(notifications_enabled)
         self._samples: List[_MarketSample] = []
         self._session_key: Optional[str] = None
@@ -60,7 +63,13 @@ class IntradayMarketMonitor:
             return list(self._index_provider() or [])
         from data_provider.base import DataFetcherManager
 
-        return list(DataFetcherManager().get_main_indices(region="cn") or [])
+        return list(
+            DataFetcherManager().get_main_indices(
+                region="cn",
+                require_realtime=True,
+            )
+            or []
+        )
 
     @staticmethod
     def _session_for(now: datetime) -> str:
@@ -82,6 +91,20 @@ class IntradayMarketMonitor:
                 values[name] = current
         return values
 
+    @staticmethod
+    def _normalize_daily_changes(rows: List[Dict[str, Any]]) -> Dict[str, float]:
+        changes: Dict[str, float] = {}
+        for row in rows:
+            name = str(row.get("name") or "").strip()
+            if name not in _INDEX_NAMES:
+                continue
+            try:
+                change_pct = float(row.get("change_pct"))
+            except (TypeError, ValueError):
+                continue
+            changes[name] = change_pct
+        return changes
+
     def run_once(self, now: Optional[datetime] = None) -> MarketTrendSnapshot:
         sampled_at = now or datetime.now()
         session_key = self._session_for(sampled_at)
@@ -90,25 +113,37 @@ class IntradayMarketMonitor:
             self.current_state = MarketTrendState.NEUTRAL
             self._session_key = session_key
 
-        values = self._normalize_indices(self._fetch_indices())
+        rows = self._fetch_indices()
+        values = self._normalize_indices(rows)
+        daily_changes = self._normalize_daily_changes(rows)
         self._samples.append(_MarketSample(sampled_at=sampled_at, values=values))
         self._samples = self._samples[-3:]
 
         previous = self.current_state
-        state, changes = self._classify()
+        state, changes = self._classify(daily_changes)
         self.current_state = state
         snapshot = MarketTrendSnapshot(
             state=state,
             sample_count=len(self._samples),
             valid_index_count=len(values),
             cumulative_changes=changes,
+            daily_changes=daily_changes,
             sampled_at=sampled_at,
         )
         if self.notifications_enabled and state is not previous:
             self._notify_transition(previous, snapshot)
         return snapshot
 
-    def _classify(self) -> tuple[MarketTrendState, Dict[str, float]]:
+    def _classify(
+        self,
+        daily_changes: Dict[str, float],
+    ) -> tuple[MarketTrendState, Dict[str, float]]:
+        daily_falling = sum(
+            value <= -self.drop_alert_pct
+            for value in daily_changes.values()
+        )
+        if daily_falling >= 2:
+            return MarketTrendState.SUSTAINED_DOWN, daily_changes
         if len(self._samples) < 3:
             return MarketTrendState.NEUTRAL, {}
         first, middle, last = self._samples
@@ -144,7 +179,11 @@ class IntradayMarketMonitor:
         previous: MarketTrendState,
         snapshot: MarketTrendSnapshot,
     ) -> None:
-        if snapshot.sample_count < 3:
+        daily_falling = sum(
+            value <= -self.drop_alert_pct
+            for value in snapshot.daily_changes.values()
+        )
+        if snapshot.sample_count < 3 and daily_falling < 2:
             return
         if snapshot.state is MarketTrendState.NEUTRAL:
             if previous is MarketTrendState.NEUTRAL:
@@ -156,7 +195,11 @@ class IntradayMarketMonitor:
             summary = "主要指数连续约20分钟同向走强。"
         else:
             title = "📉 A股出现明显持续下跌"
-            summary = "主要指数连续约20分钟同向走弱。"
+            summary = (
+                "主要指数相对昨收大幅下跌。"
+                if daily_falling >= 2
+                else "主要指数连续约20分钟同向走弱。"
+            )
 
         changes = "  ".join(
             f"{name}{value:+.2f}%"

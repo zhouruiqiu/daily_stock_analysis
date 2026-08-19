@@ -43,6 +43,23 @@ from src.services.screening.strategy import load_all_strategies
 
 logger = logging.getLogger(__name__)
 
+_INDUSTRY_DEGRADATION_MARKERS = (
+    " failed",
+    " skipped",
+    " expired",
+    " unsupported",
+    " error=",
+)
+
+
+def _industry_degradation_notes(notes: list[str]) -> list[str]:
+    """Keep only actionable industry enrichment failures as degradation."""
+    return [
+        f"Industry/concepts enrichment: {note}"
+        for note in notes
+        if any(marker in note.lower() for marker in _INDUSTRY_DEGRADATION_MARKERS)
+    ]
+
 
 def screen(
     strategy: str,
@@ -70,6 +87,8 @@ def screen(
     config: Config | None = None,
     progress_callback: Callable[[int, str], None] | None = None,
     daily_history_fetcher: Callable[..., pd.DataFrame] | None = None,
+    snapshot_df: pd.DataFrame | None = None,
+    allow_snapshot_mode_override: bool = False,
 ) -> ScreenResult:
     """Execute stock screening with the given strategy.
 
@@ -144,16 +163,20 @@ def screen(
 
     # 2. Fetch snapshot
     _emit_progress(progress_callback, 25, "正在读取全市场快照")
-    snapshot_df = fetch_snapshot_with_fallback(
-        config.snapshot_source_priority,
-        required_columns=_required_snapshot_columns(snapshot_filters),
-        required_snapshot_mode=_required_snapshot_mode(screening.snapshot_requirements),
-        fallback_snapshot_path=config.fallback_snapshot_path,
-        fallback_max_age_hours=config.snapshot_fallback_max_age_hours,
-        cache_ttl_seconds=config.snapshot_cache_ttl_seconds,
-        market=market,
-    )
-    _validate_snapshot_requirements(snapshot_df, screening.snapshot_requirements)
+    if snapshot_df is None:
+        snapshot_df = fetch_snapshot_with_fallback(
+            config.snapshot_source_priority,
+            required_columns=_required_snapshot_columns(snapshot_filters),
+            required_snapshot_mode=_required_snapshot_mode(screening.snapshot_requirements),
+            fallback_snapshot_path=config.fallback_snapshot_path,
+            fallback_max_age_hours=config.snapshot_fallback_max_age_hours,
+            cache_ttl_seconds=config.snapshot_cache_ttl_seconds,
+            market=market,
+        )
+    else:
+        snapshot_df = snapshot_df.copy(deep=True)
+    if not allow_snapshot_mode_override:
+        _validate_snapshot_requirements(snapshot_df, screening.snapshot_requirements)
     effective_industry_map_files = (
         list(industry_map_files)
         if industry_map_files is not None
@@ -174,7 +197,7 @@ def screen(
             provider_cache_dir=config.industry_provider_cache_dir,
             provider_cache_ttl_hours=config.industry_provider_cache_ttl_hours,
         )
-        degradation.extend(f"Industry/concepts enrichment: {item}" for item in industry_notes)
+        degradation.extend(_industry_degradation_notes(industry_notes))
     snapshot_count = len(snapshot_df)
     snapshot_source = str(snapshot_df.attrs.get("snapshot_source", ""))
     source_errors = [str(item) for item in snapshot_df.attrs.get("source_errors", [])]

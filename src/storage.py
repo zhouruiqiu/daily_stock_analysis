@@ -326,6 +326,87 @@ class ScreeningRun(Base):
     )
 
 
+class StrategyEvaluationRun(Base):
+    __tablename__ = 'strategy_evaluation_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), nullable=False, unique=True, index=True)
+    market = Column(String(16), nullable=False, default='cn', index=True)
+    selection_date = Column(Date, nullable=False, index=True)
+    status = Column(String(16), nullable=False, default='running', index=True)
+    engine_version = Column(String(32), nullable=False, index=True)
+    top_n = Column(Integer, nullable=False, default=5)
+    benchmark_code = Column(String(16), nullable=False, default='000300')
+    snapshot_mode = Column(String(32), nullable=False, default='previous_close')
+    strategy_count = Column(Integer, nullable=False, default=0)
+    completed_strategy_count = Column(Integer, nullable=False, default=0)
+    failed_strategy_count = Column(Integer, nullable=False, default=0)
+    summary_json = Column(Text, nullable=False, default='{}')
+    started_at = Column(DateTime, default=utc_naive_now)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=utc_naive_now, nullable=False, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('market', 'selection_date', 'engine_version', name='uix_strategy_eval_run_day'),
+    )
+
+
+class StrategyEvaluationPick(Base):
+    __tablename__ = 'strategy_evaluation_picks'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), ForeignKey('strategy_evaluation_runs.run_id', ondelete='CASCADE'), nullable=False, index=True)
+    strategy = Column(String(64), nullable=False, index=True)
+    strategy_version = Column(String(32))
+    stock_code = Column(String(16), nullable=False, index=True)
+    stock_name = Column(String(128))
+    rank = Column(Integer, nullable=False)
+    screen_score = Column(Float)
+    final_score = Column(Float)
+    auction_price = Column(Float)
+    selection_snapshot_json = Column(Text, nullable=False, default='{}')
+    source_json = Column(Text, nullable=False, default='{}')
+    warnings_json = Column(Text, nullable=False, default='[]')
+    created_at = Column(DateTime, default=utc_naive_now, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('run_id', 'strategy', 'stock_code', name='uix_strategy_eval_pick_key'),
+        Index('ix_strategy_eval_pick_rank', 'run_id', 'strategy', 'rank'),
+    )
+
+
+class StrategyEvaluationOutcome(Base):
+    __tablename__ = 'strategy_evaluation_outcomes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pick_id = Column(Integer, ForeignKey('strategy_evaluation_picks.id', ondelete='CASCADE'), nullable=False, index=True)
+    horizon = Column(String(8), nullable=False, index=True)
+    engine_version = Column(String(32), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default='pending', index=True)
+    entry_trade_date = Column(Date, index=True)
+    target_trade_date = Column(Date, index=True)
+    entry_open = Column(Float)
+    target_close = Column(Float)
+    min_low = Column(Float)
+    benchmark_entry_open = Column(Float)
+    benchmark_target_close = Column(Float)
+    stock_return_pct = Column(Float)
+    benchmark_return_pct = Column(Float)
+    excess_return_pct = Column(Float)
+    max_adverse_excursion_pct = Column(Float)
+    reason_code = Column(String(64), index=True)
+    created_at = Column(DateTime, default=utc_naive_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, nullable=False, index=True)
+    evaluated_at = Column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint('pick_id', 'horizon', 'engine_version', name='uix_strategy_eval_outcome_key'),
+        CheckConstraint("horizon IN ('1d','3d','5d')", name='ck_strategy_eval_outcome_horizon'),
+        CheckConstraint("status IN ('pending','evaluated','unable')", name='ck_strategy_eval_outcome_status'),
+    )
+
+
 class AnalysisHistory(Base):
     """
     分析结果历史记录模型
@@ -2220,7 +2301,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         normalized_payload = dict(payload)
         warnings = self._screening_warning_values(normalized_payload)
         normalized_payload["warnings"] = warnings
-
         values = {
             "strategy": str(normalized_payload.get("strategy") or "").strip() or "unknown",
             "market": str(normalized_payload.get("market") or "").strip() or "cn",
@@ -2234,31 +2314,187 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             "warnings_json": self._safe_json_dumps(warnings),
             "result_json": self._safe_json_dumps(normalized_payload),
         }
-
         try:
             def _write(session: Session) -> int:
-                row = session.execute(
-                    select(ScreeningRun).where(ScreeningRun.run_id == run_id)
-                ).scalar_one_or_none()
+                row = session.execute(select(ScreeningRun).where(ScreeningRun.run_id == run_id)).scalar_one_or_none()
                 if row is None:
                     session.add(ScreeningRun(run_id=run_id, **values))
                 else:
-                    for key, value in values.items():
-                        setattr(row, key, value)
+                    for key, value in values.items(): setattr(row, key, value)
                 return 1
-
-            return self._run_write_transaction(
-                f"save_screening_run[{run_id}]",
-                _write,
-            )
+            return self._run_write_transaction(f"save_screening_run[{run_id}]", _write)
         except Exception as exc:
-            logger.warning(
-                "选股运行历史写入失败（fail-open）: run_id=%s err=%s",
-                run_id,
-                exc,
-            )
+            logger.warning("选股运行历史写入失败（fail-open）: run_id=%s err=%s", run_id, exc)
             return 0
 
+    @staticmethod
+    def _strategy_eval_json(value: Any, fallback: Any) -> Any:
+        if value in (None, ""):
+            return fallback
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            return fallback
+        return decoded if isinstance(decoded, type(fallback)) else fallback
+
+    @classmethod
+    def _strategy_eval_run_dict(cls, row: StrategyEvaluationRun) -> Dict[str, Any]:
+        return {
+            "id": row.id, "run_id": row.run_id, "market": row.market,
+            "selection_date": row.selection_date, "status": row.status,
+            "engine_version": row.engine_version, "top_n": row.top_n,
+            "benchmark_code": row.benchmark_code, "snapshot_mode": row.snapshot_mode,
+            "strategy_count": row.strategy_count,
+            "completed_strategy_count": row.completed_strategy_count,
+            "failed_strategy_count": row.failed_strategy_count,
+            "summary": cls._strategy_eval_json(row.summary_json, {}),
+            "started_at": row.started_at, "completed_at": row.completed_at,
+            "created_at": row.created_at, "updated_at": row.updated_at,
+        }
+
+    def upsert_strategy_evaluation_run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        run_id = str(payload.get("run_id") or "").strip()
+        if not run_id:
+            raise ValueError("run_id is required")
+        selection_date = payload.get("selection_date")
+        if isinstance(selection_date, str):
+            selection_date = date.fromisoformat(selection_date)
+        if not isinstance(selection_date, date):
+            raise ValueError("selection_date is required")
+
+        def _write(session: Session) -> Dict[str, Any]:
+            row = session.execute(select(StrategyEvaluationRun).where(StrategyEvaluationRun.run_id == run_id)).scalar_one_or_none()
+            values = {
+                "market": str(payload.get("market") or "cn"),
+                "selection_date": selection_date,
+                "status": str(payload.get("status") or "running"),
+                "engine_version": str(payload.get("engine_version") or "v1"),
+                "top_n": int(payload.get("top_n") or 5),
+                "benchmark_code": str(payload.get("benchmark_code") or "000300"),
+                "snapshot_mode": str(payload.get("snapshot_mode") or "previous_close"),
+                "strategy_count": int(payload.get("strategy_count") or 0),
+                "completed_strategy_count": int(payload.get("completed_strategy_count") or 0),
+                "failed_strategy_count": int(payload.get("failed_strategy_count") or 0),
+                "summary_json": self._safe_json_dumps(payload.get("summary") or {}),
+                "completed_at": payload.get("completed_at"),
+            }
+            if row is None:
+                row = StrategyEvaluationRun(run_id=run_id, **values)
+                session.add(row)
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+            session.flush()
+            return self._strategy_eval_run_dict(row)
+
+        return self._run_write_transaction(f"upsert_strategy_evaluation_run[{run_id}]", _write)
+
+    def replace_strategy_evaluation_picks(self, run_id: str, strategy: str, picks: List[Dict[str, Any]]) -> int:
+        normalized_strategy = str(strategy or "").strip()
+        if not run_id or not normalized_strategy:
+            raise ValueError("run_id and strategy are required")
+
+        def _write(session: Session) -> int:
+            session.execute(delete(StrategyEvaluationPick).where(
+                StrategyEvaluationPick.run_id == run_id,
+                StrategyEvaluationPick.strategy == normalized_strategy,
+            ))
+            seen: set[str] = set()
+            for index, item in enumerate(picks, start=1):
+                code = str(item.get("stock_code") or item.get("code") or "").strip()
+                if not code or code in seen:
+                    continue
+                seen.add(code)
+                session.add(StrategyEvaluationPick(
+                    run_id=run_id, strategy=normalized_strategy,
+                    strategy_version=item.get("strategy_version"), stock_code=code,
+                    stock_name=item.get("stock_name") or item.get("name"),
+                    rank=int(item.get("rank") or index), screen_score=item.get("screen_score"),
+                    final_score=item.get("final_score"), auction_price=item.get("auction_price"),
+                    selection_snapshot_json=self._safe_json_dumps(item.get("selection_snapshot") or item),
+                    source_json=self._safe_json_dumps(item.get("source") or {}),
+                    warnings_json=self._safe_json_dumps(item.get("warnings") or []),
+                ))
+            session.flush()
+            return len(seen)
+
+        return self._run_write_transaction(f"replace_strategy_evaluation_picks[{run_id}:{normalized_strategy}]", _write)
+
+    def list_strategy_evaluation_picks(self, *, run_id: Optional[str] = None, strategy: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self.get_session() as session:
+            statement = select(StrategyEvaluationPick)
+            if run_id:
+                statement = statement.where(StrategyEvaluationPick.run_id == run_id)
+            if strategy:
+                statement = statement.where(StrategyEvaluationPick.strategy == strategy)
+            rows = session.execute(statement.order_by(StrategyEvaluationPick.strategy, StrategyEvaluationPick.rank)).scalars().all()
+            return [{
+                "id": row.id, "run_id": row.run_id, "strategy": row.strategy,
+                "strategy_version": row.strategy_version, "stock_code": row.stock_code,
+                "stock_name": row.stock_name, "rank": row.rank,
+                "screen_score": row.screen_score, "final_score": row.final_score,
+                "auction_price": row.auction_price,
+                "selection_snapshot": self._strategy_eval_json(row.selection_snapshot_json, {}),
+                "warnings": self._strategy_eval_json(row.warnings_json, []),
+                "created_at": row.created_at,
+            } for row in rows]
+
+    def list_strategy_evaluation_runs(self, *, limit: int = 30) -> List[Dict[str, Any]]:
+        with self.get_session() as session:
+            rows = session.execute(
+                select(StrategyEvaluationRun)
+                .order_by(desc(StrategyEvaluationRun.selection_date), desc(StrategyEvaluationRun.id))
+                .limit(max(1, min(int(limit), 365)))
+            ).scalars().all()
+            return [self._strategy_eval_run_dict(row) for row in rows]
+
+    def get_strategy_evaluation_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        with self.get_session() as session:
+            row = session.execute(select(StrategyEvaluationRun).where(
+                StrategyEvaluationRun.run_id == str(run_id)
+            )).scalar_one_or_none()
+            return self._strategy_eval_run_dict(row) if row is not None else None
+
+    @classmethod
+    def _strategy_eval_outcome_dict(cls, row: StrategyEvaluationOutcome) -> Dict[str, Any]:
+        return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+    def upsert_strategy_evaluation_outcome(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        pick_id = int(payload.get("pick_id") or 0)
+        horizon = str(payload.get("horizon") or "")
+        engine_version = str(payload.get("engine_version") or "v1")
+        if pick_id <= 0 or horizon not in {"1d", "3d", "5d"}:
+            raise ValueError("valid pick_id and horizon are required")
+
+        def _write(session: Session) -> Dict[str, Any]:
+            row = session.execute(select(StrategyEvaluationOutcome).where(
+                StrategyEvaluationOutcome.pick_id == pick_id,
+                StrategyEvaluationOutcome.horizon == horizon,
+                StrategyEvaluationOutcome.engine_version == engine_version,
+            )).scalar_one_or_none()
+            if row is not None and row.status in {"evaluated", "unable"}:
+                return self._strategy_eval_outcome_dict(row)
+            if row is None:
+                row = StrategyEvaluationOutcome(pick_id=pick_id, horizon=horizon, engine_version=engine_version)
+                session.add(row)
+            allowed = {column.name for column in StrategyEvaluationOutcome.__table__.columns} - {"id", "pick_id", "horizon", "engine_version", "created_at"}
+            for key in allowed:
+                if key in payload:
+                    setattr(row, key, payload[key])
+            session.flush()
+            return self._strategy_eval_outcome_dict(row)
+
+        return self._run_write_transaction(f"upsert_strategy_evaluation_outcome[{pick_id}:{horizon}]", _write)
+
+    def list_strategy_evaluation_outcomes(self, *, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self.get_session() as session:
+            statement = select(StrategyEvaluationOutcome)
+            if status:
+                statement = statement.where(StrategyEvaluationOutcome.status == status)
+            rows = session.execute(statement.order_by(StrategyEvaluationOutcome.id)).scalars().all()
+            return [self._strategy_eval_outcome_dict(row) for row in rows]
     def list_screening_runs(
         self,
         *,

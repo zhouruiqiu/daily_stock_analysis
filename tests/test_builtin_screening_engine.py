@@ -87,6 +87,20 @@ def test_bundled_strategies_are_loaded_from_the_internal_package() -> None:
     assert strategies["dual_low"].screening.factor_weights["value"] < 0.40
 
 
+def test_industry_enrichment_success_notes_are_not_degradation() -> None:
+    notes = [
+        "industry provider cache hit: cache.json rows=784",
+        "industry/concepts enrichment applied: industry=0, concepts=783, heat=2349",
+        "akshare concepts board list failed: provider timeout",
+        "industry provider cache skipped: cache.json invalid payload",
+    ]
+
+    assert screening_pipeline._industry_degradation_notes(notes) == [
+        "Industry/concepts enrichment: akshare concepts board list failed: provider timeout",
+        "Industry/concepts enrichment: industry provider cache skipped: cache.json invalid payload",
+    ]
+
+
 def test_list_strategies_preserves_legacy_strategies_dir_override() -> None:
     strategy_yaml = """
 name: custom_demo

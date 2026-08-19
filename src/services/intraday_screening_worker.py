@@ -26,6 +26,7 @@ _STATE_REASON = {
     MarketTrendState.SUSTAINED_DOWN: "主要指数持续走弱，使用防守型低波策略",
     MarketTrendState.NEUTRAL: "大盘未形成明显单边趋势，使用趋势回踩策略",
 }
+_OPENING_STRATEGY_REASON = "开盘后观察强势题材，捕捉早盘资金聚焦方向"
 
 
 def select_strategy(state: MarketTrendState) -> str:
@@ -76,12 +77,16 @@ class IntradayScreeningWorker:
         self,
         state: MarketTrendState,
         now: Optional[datetime] = None,
+        *,
+        strategy: Optional[str] = None,
     ) -> Dict[str, Any]:
         executed_at = now or datetime.now()
         normalized_state = MarketTrendState(state)
-        strategy = select_strategy(normalized_state)
+        selected_strategy = strategy or select_strategy(normalized_state)
+        if selected_strategy not in _STRATEGY_LABEL:
+            raise ValueError(f"Unsupported intraday screening strategy: {selected_strategy}")
         stats: Dict[str, Any] = {
-            "strategy": strategy,
+            "strategy": selected_strategy,
             "selected": 0,
             "notified": 0,
             "failed": 0,
@@ -93,7 +98,7 @@ class IntradayScreeningWorker:
                 min(int(getattr(config, "intraday_screening_max_results", 5) or 5), 20),
             )
             result = self._get_screening_service(config).screen(
-                strategy=strategy,
+                strategy=selected_strategy,
                 market="cn",
                 max_results=max_results,
             )
@@ -101,10 +106,15 @@ class IntradayScreeningWorker:
             stats["selected"] = len(candidates)
             content = self._format_result(
                 state=normalized_state,
-                strategy=strategy,
+                strategy=selected_strategy,
                 executed_at=executed_at,
                 result=result,
                 candidates=candidates,
+                reason=(
+                    _OPENING_STRATEGY_REASON
+                    if strategy is not None
+                    else _STATE_REASON[normalized_state]
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - one failed run must not stop scheduling.
             logger.exception("[IntradayScreening] run failed: %s", exc)
@@ -112,7 +122,7 @@ class IntradayScreeningWorker:
             content = (
                 "⚠️ 盘中动态选股执行失败\n"
                 f"⏰ {executed_at.strftime('%Y-%m-%d %H:%M')}\n"
-                f"策略：{_STRATEGY_LABEL[strategy]}\n"
+                f"策略：{_STRATEGY_LABEL[selected_strategy]}\n"
                 f"原因：{exc}"
             )
 
@@ -131,13 +141,14 @@ class IntradayScreeningWorker:
         executed_at: datetime,
         result: Dict[str, Any],
         candidates: list[Dict[str, Any]],
+        reason: Optional[str] = None,
     ) -> str:
         lines = [
             "🎯 盘中动态选股",
             f"⏰ {executed_at.strftime('%Y-%m-%d %H:%M')}",
             f"大盘状态：{state.value}",
             f"本次策略：{_STRATEGY_LABEL[strategy]}",
-            f"选择原因：{_STATE_REASON[state]}",
+            f"选择原因：{reason or _STATE_REASON[state]}",
             "━" * 16,
         ]
         if not candidates:
