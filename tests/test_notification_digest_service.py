@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.services.notification_digest_service import (
+    DigestRecordOutcome,
     NotificationDigestService,
     classify_urgency,
 )
@@ -278,3 +279,72 @@ class SchedulerDigestSlotTest(TestCase):
         self.assertTrue(intraday_capabilities_enabled(config))
         config.notification_digest_enabled = False
         self.assertFalse(intraday_capabilities_enabled(config))
+
+    def test_1515_buffers_trading_plan_before_digest_flush(self) -> None:
+        from src.core.trading_calendar import MarketPhase
+        from src.services.intraday_session_scheduler import IntradaySessionCoordinator
+
+        operations = []
+        plan = SimpleNamespace(
+            total_equity=100000, exposure_pct=70, target_exposure_pct=60,
+            cash_pct=30, drawdown_pct=2, risk_state="normal", items=[],
+        )
+        config = SimpleNamespace(
+            intraday_watch_enabled=False,
+            intraday_market_monitor_enabled=False,
+            intraday_screening_enabled=False,
+            strategy_evaluation_enabled=False,
+            notification_digest_enabled=True,
+            notification_digest_times=["15:15"],
+            notification_digest_max_events=30,
+            portfolio_trading_plan_enabled=True,
+        )
+        coordinator = IntradaySessionCoordinator(
+            config_provider=lambda: config,
+            phase_provider=lambda _now: MarketPhase.POSTMARKET,
+            trading_plan_provider=lambda: plan,
+        )
+
+        def _record(self, **kwargs):
+            operations.append(("record", kwargs["content"]))
+            return DigestRecordOutcome(buffered=True, duplicate=False)
+
+        def _flush(self, **kwargs):
+            operations.append(("flush", kwargs["slot"]))
+            return {"slot": kwargs["slot"], "event_count": 1, "sent": True}
+
+        with patch.object(NotificationDigestService, "record_event", _record), patch.object(
+            NotificationDigestService, "flush", _flush
+        ), patch("src.storage.DatabaseManager", return_value=None):
+            coordinator.tick(datetime(2026, 8, 31, 15, 15))
+
+        self.assertEqual([item[0] for item in operations], ["record", "flush"])
+        self.assertIn("不构成收益保证或自动交易指令", operations[0][1])
+
+    def test_trading_plan_failure_does_not_block_existing_digest(self) -> None:
+        from src.core.trading_calendar import MarketPhase
+        from src.services.intraday_session_scheduler import IntradaySessionCoordinator
+
+        flushes = []
+        config = SimpleNamespace(
+            intraday_watch_enabled=False, intraday_market_monitor_enabled=False,
+            intraday_screening_enabled=False, strategy_evaluation_enabled=False,
+            notification_digest_enabled=True, notification_digest_times=["15:15"],
+            notification_digest_max_events=30, portfolio_trading_plan_enabled=True,
+        )
+        coordinator = IntradaySessionCoordinator(
+            config_provider=lambda: config,
+            phase_provider=lambda _now: MarketPhase.POSTMARKET,
+            trading_plan_provider=lambda: (_ for _ in ()).throw(RuntimeError("plan failed")),
+        )
+
+        def _flush(self, **kwargs):
+            flushes.append(kwargs["slot"])
+            return {"slot": kwargs["slot"], "event_count": 1, "sent": True}
+
+        with patch.object(NotificationDigestService, "flush", _flush), patch(
+            "src.storage.DatabaseManager", return_value=None
+        ):
+            coordinator.tick(datetime(2026, 8, 31, 15, 15))
+
+        self.assertEqual(flushes, ["15:15"])

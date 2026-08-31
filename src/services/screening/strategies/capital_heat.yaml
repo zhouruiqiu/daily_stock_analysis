@@ -8,6 +8,7 @@ version: "1.1"
 category: momentum
 tags: [momentum, capital_flow, short_term]
 analysis_skills: [hot_theme, emotion_cycle]
+evaluation_profile: {cohort: intraday_1000, risk_tier: high, max_position_pct: 0.08}
 style:
   risk_profile: aggressive
   holding_period: short_term

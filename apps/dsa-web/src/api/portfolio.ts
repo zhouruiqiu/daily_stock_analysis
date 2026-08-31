@@ -21,6 +21,7 @@ import type {
   PortfolioSnapshotResponse,
   PortfolioTradeCreateRequest,
   PortfolioTradeListResponse,
+  PortfolioTradingPlanResponse,
 } from '../types/portfolio';
 
 type SnapshotQuery = {
@@ -106,6 +107,13 @@ function buildEventParams(query: EventQuery): Record<string, string | number> {
 }
 
 export const portfolioApi = {
+  async getTradingPlan(accountId?: number): Promise<PortfolioTradingPlanResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/trading-plan', {
+      params: accountId == null ? undefined : { account_id: accountId },
+    });
+    return toCamelCase<PortfolioTradingPlanResponse>(response.data);
+  },
+
   async getAccounts(includeInactive = false): Promise<PortfolioAccountListResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/accounts', {
       params: { include_inactive: includeInactive },

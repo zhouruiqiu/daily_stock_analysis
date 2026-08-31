@@ -120,3 +120,64 @@ def test_leaderboard_includes_empty_and_failed_strategies_from_run_summary():
         "alpha", "broken_strategy", "empty_strategy",
     ]
     assert all(item["sample_status"] == "pending" for item in board["items"])
+
+
+def test_intraday_cohort_uses_recorded_selection_price_as_entry():
+    days = [date(2026, 8, 19), date(2026, 8, 20)]
+    db = _Db()
+    db.list_strategy_evaluation_runs = lambda limit=365: [{
+        "run_id": "r1",
+        "selection_date": days[0],
+        "benchmark_code": "000300",
+        "summary": {"cohort": "intraday_1000"},
+    }]
+    db.list_strategy_evaluation_picks = lambda run_id=None, strategy=None: [{
+        "id": 1,
+        "run_id": "r1",
+        "strategy": "capital_heat",
+        "stock_code": "600036",
+        "auction_price": 12.0,
+    }]
+
+    def bars(code, start, end, is_index=False):
+        base = 100 if is_index else 10
+        return pd.DataFrame([
+            {"date": days[0], "open": base, "close": base, "low": base - 1},
+            {"date": days[1], "open": base, "close": base + 2, "low": base},
+        ])
+
+    service = StrategyOutcomeService(
+        db_manager=db,
+        bar_provider=bars,
+        trade_days_provider=lambda start, count: days,
+    )
+    service.run_due(days[1], horizons=[1])
+
+    assert db.outcomes[(1, "1d")]["entry_open"] == 12.0
+    assert db.outcomes[(1, "1d")]["stock_return_pct"] == 0.0
+
+
+def test_leaderboard_filters_strategies_by_cohort():
+    db = _Db()
+    db.list_strategy_evaluation_runs = lambda limit=365: [
+        {
+            "run_id": "preopen-run",
+            "selection_date": date(2026, 8, 19),
+            "summary": {"cohort": "preopen_previous_close", "strategies": {"alpha": []}},
+        },
+        {
+            "run_id": "opening-run",
+            "selection_date": date(2026, 8, 19),
+            "summary": {"cohort": "opening_0945", "strategies": {"dragon_board": []}},
+        },
+    ]
+    db.list_strategy_evaluation_picks = lambda run_id=None, strategy=None: [
+        {"id": 1, "run_id": "preopen-run", "strategy": "alpha", "stock_code": "600036"},
+        {"id": 2, "run_id": "opening-run", "strategy": "dragon_board", "stock_code": "000001"},
+    ]
+    service = StrategyOutcomeService(db_manager=db)
+
+    board = service.get_leaderboard("5d", cohort="opening_0945")
+
+    assert board["cohort"] == "opening_0945"
+    assert [item["strategy"] for item in board["items"]] == ["dragon_board"]

@@ -8,6 +8,7 @@ version: "1.2"
 category: reversal
 tags: [reversal, oversold, repair]
 analysis_skills: [bottom_volume]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: medium, max_position_pct: 0.10}
 style:
   risk_profile: balanced
   holding_period: short_term

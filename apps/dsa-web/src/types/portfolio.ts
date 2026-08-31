@@ -338,3 +338,48 @@ export interface PortfolioFxRefreshResponse {
   staleCount: number;
   errorCount: number;
 }
+
+export interface TradingPlanItem {
+  stockCode: string;
+  stockName: string;
+  currentQuantity: number;
+  currentPrice: number;
+  currentWeightPct: number;
+  positionCapPct: number;
+  volatilityTier: string;
+  action: 'hold' | 'observe' | 'reduce' | 'exit' | 'add_if_confirmed' | 'blocked';
+  actionReason: string;
+  unrealizedPnlPct?: number | null;
+  nearestSupport?: number | null;
+  supportBreached?: boolean;
+  supportBreakPct?: number | null;
+  stopPrice?: number | null;
+  trailingStopPrice?: number | null;
+  takeProfitLevels: number[];
+  maxReduceQuantity?: number | null;
+  maxAdditionalQuantity: number;
+  riskBudgetAmount?: number;
+  entryCondition?: string | null;
+  reduceCondition?: string | null;
+  exitCondition?: string | null;
+  blockingReasons: string[];
+  dataQuality: string;
+}
+
+export interface PortfolioTradingPlanResponse {
+  generatedAt: string;
+  asOf: string;
+  totalEquity: number;
+  investedAmount: number;
+  cashAmount: number;
+  exposurePct: number;
+  targetExposurePct: number;
+  cashPct: number;
+  peakEquity: number;
+  drawdownPct: number;
+  riskState: string;
+  newPositionsAllowed: boolean;
+  portfolioBlockingReasons: string[];
+  limitations: string[];
+  items: TradingPlanItem[];
+}

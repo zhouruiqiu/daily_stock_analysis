@@ -7,6 +7,7 @@ description: 基于PE/PB、流动性、市值和交易稳定性发现低估值�
 version: "1.2"
 category: value
 tags: [value, stability, dynamic_signal]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: low, max_position_pct: 0.10}
 style:
   risk_profile: defensive
   holding_period: watchlist

@@ -8,6 +8,7 @@ version: "1.1"
 category: framework
 tags: [momentum, quality, trend, llm_friendly]
 analysis_skills: [bull_trend, growth_quality]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: medium, max_position_pct: 0.10}
 style:
   risk_profile: balanced
   holding_period: swing

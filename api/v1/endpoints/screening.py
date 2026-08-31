@@ -100,8 +100,20 @@ def strategy_evaluation_run_detail(run_id: str, db: DatabaseManager = Depends(ge
 
 
 @router.get("/evaluation/leaderboard")
-def strategy_evaluation_leaderboard(horizon: str = Query("5d",pattern="^(1d|3d|5d)$"), window: int = Query(20,ge=5,le=120), db: DatabaseManager = Depends(get_database_manager)) -> Dict[str, Any]:
-    return StrategyOutcomeService(db_manager=db).get_leaderboard(horizon,window=window)
+def strategy_evaluation_leaderboard(
+    horizon: str = Query("5d", pattern="^(1d|3d|5d)$"),
+    window: int = Query(20, ge=5, le=120),
+    cohort: str = Query(
+        "preopen_previous_close",
+        pattern="^(preopen_previous_close|opening_0945|intraday_1000)$",
+    ),
+    db: DatabaseManager = Depends(get_database_manager),
+) -> Dict[str, Any]:
+    return StrategyOutcomeService(db_manager=db).get_leaderboard(
+        horizon,
+        window=window,
+        cohort=cohort,
+    )
 
 
 @router.get("/evaluation/strategies/{strategy}/history")

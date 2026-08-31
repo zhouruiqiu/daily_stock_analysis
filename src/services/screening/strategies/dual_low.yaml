@@ -7,6 +7,7 @@ description: 偏稳健的低估值筛选策略，叠加当日活跃度与形态�
 version: "1.2"
 category: value
 tags: [value, defensive, low_valuation, dynamic_signal]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: low, max_position_pct: 0.10}
 style:
   risk_profile: defensive
   holding_period: watchlist

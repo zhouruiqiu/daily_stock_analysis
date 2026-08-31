@@ -7,6 +7,7 @@ description: 偏防守的质量型候选，优先选择波动较低、回撤浅�
 version: "1.0"
 category: quality
 tags: [quality, defensive, low_volatility, daily_k]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: low, max_position_pct: 0.10}
 style:
   risk_profile: defensive
   holding_period: swing

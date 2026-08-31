@@ -8,6 +8,7 @@ version: "1.2"
 category: trend
 tags: [momentum, volume, breakout]
 analysis_skills: [volume_breakout]
+evaluation_profile: {cohort: intraday_1000, risk_tier: high, max_position_pct: 0.08}
 style:
   risk_profile: aggressive
   holding_period: short_term

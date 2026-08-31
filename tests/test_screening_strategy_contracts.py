@@ -101,6 +101,44 @@ def test_load_strategy_keeps_legacy_tech_weight_only_config(tmp_path: Path) -> N
     assert strategy.screening.factor_weights == {}
 
 
+def test_load_strategy_exposes_evaluation_profile(tmp_path: Path) -> None:
+    path = _write_strategy(tmp_path, factor_weights={"value": 1.0})
+    content = path.read_text(encoding="utf-8")
+    path.write_text(
+        content.replace(
+            "screening:\n",
+            "evaluation_profile:\n"
+            "  cohort: opening_0945\n"
+            "  risk_tier: high\n"
+            "  max_position_pct: 0.08\n\n"
+            "screening:\n",
+        ),
+        encoding="utf-8",
+    )
+
+    strategy = load_strategy(path)
+
+    assert strategy.evaluation_profile.cohort == "opening_0945"
+    assert strategy.evaluation_profile.risk_tier == "high"
+    assert strategy.evaluation_profile.max_position_pct == 0.08
+
+
+def test_load_strategy_rejects_unknown_evaluation_cohort(tmp_path: Path) -> None:
+    path = _write_strategy(tmp_path, factor_weights={"value": 1.0})
+    content = path.read_text(encoding="utf-8")
+    path.write_text(
+        content.replace(
+            "screening:\n",
+            "evaluation_profile:\n  cohort: lunchtime\n  risk_tier: medium\n"
+            "  max_position_pct: 0.10\n\nscreening:\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="evaluation_profile.cohort"):
+        load_strategy(path)
+
+
 def test_builtin_strategies_use_explicit_factor_weights_only() -> None:
     for path in STRATEGY_DIR.glob("*.yaml"):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))

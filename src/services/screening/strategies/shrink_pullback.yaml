@@ -8,6 +8,7 @@ version: "1.1"
 category: trend
 tags: [trend, pullback, daily_k]
 analysis_skills: [shrink_pullback]
+evaluation_profile: {cohort: preopen_previous_close, risk_tier: medium, max_position_pct: 0.10}
 style:
   risk_profile: balanced
   holding_period: swing

@@ -82,6 +82,15 @@ class StrategyStyle:
 
 
 @dataclass
+class EvaluationProfile:
+    """Timing and risk metadata used by the strategy evaluation pipeline."""
+
+    cohort: str = "preopen_previous_close"
+    risk_tier: str = "medium"
+    max_position_pct: float = 0.10
+
+
+@dataclass
 class Strategy:
     name: str
     display_name: str
@@ -91,6 +100,7 @@ class Strategy:
     tags: list[str] = field(default_factory=list)
     analysis_skills: list[str] = field(default_factory=list)
     style: StrategyStyle = field(default_factory=StrategyStyle)
+    evaluation_profile: EvaluationProfile = field(default_factory=EvaluationProfile)
     screening: ScreeningConfig = field(default_factory=ScreeningConfig)
 
 
@@ -113,6 +123,7 @@ class StrategyInfo:
     factor_weights: dict[str, float] = field(default_factory=dict)
     profile_keys: dict[str, list[str]] = field(default_factory=dict)
     style: dict[str, object] = field(default_factory=dict)
+    evaluation_profile: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass

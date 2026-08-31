@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from src.services.screening.models import (
+    EvaluationProfile,
     HardFilterConfig,
     ScreeningConfig,
     Strategy,
@@ -29,6 +30,7 @@ _TOP_LEVEL_KEYS = {
     "tags",
     "analysis_skills",
     "style",
+    "evaluation_profile",
     "screening",
 }
 _SCREENING_KEYS = {
@@ -186,6 +188,9 @@ _STYLE_KEYS = {
     "capital_profile",
     "ui_badge",
 }
+_EVALUATION_PROFILE_KEYS = {"cohort", "risk_tier", "max_position_pct"}
+_EVALUATION_COHORTS = {"preopen_previous_close", "opening_0945", "intraday_1000"}
+_EVALUATION_RISK_TIERS = {"low", "medium", "high"}
 _STRATEGY_DIR_CACHE: dict[
     Path,
     tuple[tuple[tuple[str, int, int, str], ...], dict[str, Strategy]],
@@ -266,6 +271,8 @@ def load_strategy(filepath: Path) -> Strategy:
         max_output=screening_data.get("max_output", 5),
     )
 
+    evaluation_profile = _evaluation_profile(data, filepath)
+
     return Strategy(
         name=data.get("name", filepath.stem),
         display_name=data.get("display_name", data.get("name", filepath.stem)),
@@ -275,6 +282,7 @@ def load_strategy(filepath: Path) -> Strategy:
         tags=list(data.get("tags", []) or []),
         analysis_skills=_string_list(data.get("analysis_skills")),
         style=_strategy_style(data, filepath),
+        evaluation_profile=evaluation_profile,
         screening=screening,
     )
 
@@ -408,6 +416,7 @@ def list_strategies(strategies_dir: Path | None = None) -> list[StrategyInfo]:
             factor_weights={key: float(value) for key, value in s.screening.factor_weights.items()},
             profile_keys=_strategy_profile_keys(s.screening),
             style=_style_to_dict(s.style),
+            evaluation_profile=asdict(s.evaluation_profile),
         ))
     return infos
 
@@ -985,6 +994,39 @@ def _strategy_style(data: dict, filepath: Path) -> StrategyStyle:
         market_regime=_string_list(raw.get("market_regime") or inferred.market_regime),
         capital_profile=str(raw.get("capital_profile") or inferred.capital_profile),
         ui_badge=str(raw.get("ui_badge") or inferred.ui_badge),
+    )
+
+
+def _evaluation_profile(data: dict, filepath: Path) -> EvaluationProfile:
+    raw = data.get("evaluation_profile", {}) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid evaluation_profile section in strategy file: {filepath}")
+    _raise_unknown_keys(
+        raw,
+        _EVALUATION_PROFILE_KEYS,
+        f"evaluation_profile section of {filepath.name}",
+    )
+    cohort = str(raw.get("cohort") or "preopen_previous_close")
+    risk_tier = str(raw.get("risk_tier") or "medium")
+    if cohort not in _EVALUATION_COHORTS:
+        raise ValueError(f"Invalid evaluation_profile.cohort in strategy file {filepath.name}: {cohort}")
+    if risk_tier not in _EVALUATION_RISK_TIERS:
+        raise ValueError(f"Invalid evaluation_profile.risk_tier in strategy file {filepath.name}: {risk_tier}")
+    try:
+        max_position_pct = float(raw.get("max_position_pct", 0.10))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid evaluation_profile.max_position_pct in strategy file {filepath.name}"
+        ) from exc
+    if not 0 < max_position_pct <= 1:
+        raise ValueError(
+            f"Invalid evaluation_profile.max_position_pct in strategy file {filepath.name}: "
+            "must be within (0, 1]"
+        )
+    return EvaluationProfile(
+        cohort=cohort,
+        risk_tier=risk_tier,
+        max_position_pct=max_position_pct,
     )
 
 

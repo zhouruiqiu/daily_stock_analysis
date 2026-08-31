@@ -33,6 +33,45 @@ _TRAILING_STOP_WINDOW = 10          # 近 N 日最低价作为移动止损参考
 _HIGH_VOL_PREFIXES = ("300", "301", "302", "688", "689")  # 创业板/科创
 
 _DISCLAIMER = "规则化风险管理计划，不构成收益保证或自动交易指令"
+_PUSH_DISCLAIMER = "这是规则化风险管理计划，不构成收益保证或自动交易指令。"
+
+
+def format_trading_plan_digest(plan: PortfolioTradingPlan) -> str:
+    """Render a compact, read-only portfolio plan for the closing digest."""
+    action_labels = {
+        "hold": "持有",
+        "observe": "观察",
+        "reduce": "建议减仓",
+        "exit": "建议退出",
+        "add_if_confirmed": "条件确认后可加仓",
+        "blocked": "已阻止",
+    }
+    risk_labels = {
+        "normal": "正常",
+        "caution": "警惕",
+        "defensive": "防守",
+        "drawdown_lock": "回撤锁定",
+    }
+    lines = [
+        "📋 收盘交易计划",
+        f"净资产：¥{plan.total_equity:,.2f}｜仓位：{plan.exposure_pct:.1f}%"
+        f"（目标 {plan.target_exposure_pct:.1f}%）｜现金：{plan.cash_pct:.1f}%",
+        f"风险状态：{risk_labels.get(plan.risk_state, plan.risk_state)}｜回撤：{plan.drawdown_pct:.2f}%",
+    ]
+    for item in plan.items:
+        quantity_parts = []
+        if item.max_reduce_quantity:
+            quantity_parts.append(f"最多减{item.max_reduce_quantity:g}股")
+        if item.max_additional_quantity:
+            quantity_parts.append(f"条件加{item.max_additional_quantity:g}股")
+        quantity = f"｜{'、'.join(quantity_parts)}" if quantity_parts else ""
+        lines.append(
+            f"{item.stock_name} {item.stock_code}｜"
+            f"{action_labels.get(item.action, item.action)}｜仓位{item.current_weight_pct:.1f}%"
+            f"{quantity}｜{item.action_reason}"
+        )
+    lines.append(_PUSH_DISCLAIMER)
+    return "\n".join(lines)
 
 
 def classify_volatility_tier(stock_code: str) -> str:

@@ -78,7 +78,7 @@ def classify_urgency(
 def infer_event_type(content: str) -> str:
     """从内容推断事件类型（用于简报内分组标题）。"""
     text = content or ""
-    if "盯盘" in text:
+    if "盯盘" in text or "交易计划" in text:
         return "portfolio_watch"
     if "选股" in text or "题材" in text:
         return "dynamic_screening"

@@ -42,6 +42,7 @@ class IntradaySessionCoordinator:
         watch_worker: Optional[Any] = None,
         phase_provider: Optional[Callable[[datetime], MarketPhase]] = None,
         task_launcher: Optional[Callable[[Callable[[], None]], None]] = None,
+        trading_plan_provider: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.config_provider = config_provider or self._default_config_provider
         self.market_monitor = market_monitor
@@ -49,6 +50,7 @@ class IntradaySessionCoordinator:
         self.watch_worker = watch_worker
         self.phase_provider = phase_provider or self._default_phase_provider
         self.task_launcher = task_launcher or self._launch_daemon
+        self.trading_plan_provider = trading_plan_provider
         self._claimed_slots: set[str] = set()
         self._claim_date: Optional[str] = None
         self._screening_running = False
@@ -200,6 +202,31 @@ class IntradaySessionCoordinator:
                             getattr(config, "notification_digest_max_events", 30) or 30
                         ),
                     )
+                    if (
+                        current_time == "15:15"
+                        and bool(getattr(config, "portfolio_trading_plan_enabled", False))
+                    ):
+                        try:
+                            from src.services.portfolio_trading_plan_service import (
+                                PortfolioTradingPlanService,
+                                format_trading_plan_digest,
+                            )
+
+                            provider = self.trading_plan_provider
+                            plan = (
+                                provider()
+                                if provider is not None
+                                else PortfolioTradingPlanService(DatabaseManager()).build_plan(now=current)
+                            )
+                            digest.record_event(
+                                content=format_trading_plan_digest(plan),
+                                route_type="alert",
+                                severity="normal",
+                                dedup_key=f"portfolio-trading-plan:{current.date().isoformat()}",
+                                occurred_at=current,
+                            )
+                        except Exception as exc:  # noqa: BLE001 - existing digest still needs delivery.
+                            logger.exception("[IntradaySession] trading plan digest build failed: %s", exc)
                     stats = digest.flush(slot=current_time, now=current)
                     if stats.get("event_count"):
                         result["executed"].append("digest")

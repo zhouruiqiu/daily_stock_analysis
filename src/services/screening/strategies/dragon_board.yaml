@@ -8,6 +8,7 @@ version: "1.2"
 category: trend
 tags: [momentum, theme, hot_money, experimental]
 analysis_skills: [hot_theme, bull_trend]
+evaluation_profile: {cohort: opening_0945, risk_tier: high, max_position_pct: 0.08}
 style:
   risk_profile: aggressive
   holding_period: short_term

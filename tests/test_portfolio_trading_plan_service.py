@@ -17,6 +17,7 @@ from src.schemas.trading_plan import DrawdownRiskState
 from src.services.portfolio_trading_plan_service import (
     PortfolioTradingPlanService,
     classify_volatility_tier,
+    format_trading_plan_digest,
     floor_to_lot,
 )
 from src.storage import Base, PortfolioRiskState
@@ -103,6 +104,26 @@ class HelpersTest(TestCase):
         self.assertEqual(floor_to_lot(200), 200)
         self.assertEqual(floor_to_lot(99), 0)
         self.assertEqual(floor_to_lot(-50), 0)
+
+    def test_digest_format_includes_actions_and_required_disclaimer(self) -> None:
+        plan = SimpleNamespace(
+            total_equity=100000,
+            exposure_pct=75,
+            target_exposure_pct=60,
+            cash_pct=25,
+            drawdown_pct=3.5,
+            risk_state="normal",
+            items=[SimpleNamespace(
+                stock_name="香农芯创", stock_code="300475", action="observe",
+                current_weight_pct=4.0, action_reason="等待确认",
+                max_reduce_quantity=None, max_additional_quantity=0,
+            )],
+        )
+
+        content = format_trading_plan_digest(plan)
+
+        self.assertIn("香农芯创 300475｜观察", content)
+        self.assertIn("这是规则化风险管理计划，不构成收益保证或自动交易指令。", content)
 
 
 class RiskStateMachineTest(TestCase):

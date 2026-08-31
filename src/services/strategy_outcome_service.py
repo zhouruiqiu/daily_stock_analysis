@@ -60,6 +60,12 @@ class StrategyOutcomeService:
         evaluated=pending=unable=0
         for run in self.db.list_strategy_evaluation_runs(limit=365):
             selection=run["selection_date"]
+            summary = run.get("summary") if isinstance(run, dict) else {}
+            cohort = (
+                str(summary.get("cohort") or "preopen_previous_close")
+                if isinstance(summary, dict)
+                else "preopen_previous_close"
+            )
             days=self.trade_days_provider(selection, max(requested)+1)
             if not days or days[0] != selection: continue
             benchmark=self.bar_provider(run.get("benchmark_code") or "000300",days[0],days[-1],is_index=True)
@@ -79,7 +85,14 @@ class StrategyOutcomeService:
                         b_entry=benchmark.loc[benchmark["date"]==days[0]].iloc[0]
                         b_target=benchmark.loc[benchmark["date"]==target].iloc[0]
                         window=stock[(stock["date"]>=days[0]) & (stock["date"]<=target)]
-                        entry_open=float(entry["open"]); target_close=float(target_row["close"])
+                        market_open = float(entry["open"])
+                        recorded_price = pick.get("auction_price")
+                        entry_open = (
+                            float(recorded_price)
+                            if cohort != "preopen_previous_close" and recorded_price
+                            else market_open
+                        )
+                        target_close=float(target_row["close"])
                         b_open=float(b_entry["open"]); b_close=float(b_target["close"])
                         stock_return=round((target_close/entry_open-1)*100,4)
                         benchmark_return=round((b_close/b_open-1)*100,4)
@@ -95,11 +108,34 @@ class StrategyOutcomeService:
                         self.db.upsert_strategy_evaluation_outcome(payload); pending+=1
         return {"evaluated":evaluated,"pending":pending,"unable":unable}
 
-    def get_leaderboard(self, horizon: str = "5d", *, window: int = 20) -> dict[str, Any]:
-        picks=self.db.list_strategy_evaluation_picks()
+    def get_leaderboard(
+        self,
+        horizon: str = "5d",
+        *,
+        window: int = 20,
+        cohort: str = "preopen_previous_close",
+    ) -> dict[str, Any]:
+        runs = self.db.list_strategy_evaluation_runs(limit=min(window * 3, 365))
+        matching_runs = []
+        for run in runs:
+            summary = run.get("summary") if isinstance(run, dict) else None
+            run_cohort = (
+                str(summary.get("cohort") or "preopen_previous_close")
+                if isinstance(summary, dict)
+                else "preopen_previous_close"
+            )
+            if run_cohort == cohort:
+                matching_runs.append(run)
+                if len(matching_runs) >= window:
+                    break
+        run_ids = {str(run.get("run_id") or "") for run in matching_runs}
+        picks=[
+            item for item in self.db.list_strategy_evaluation_picks()
+            if str(item.get("run_id") or "") in run_ids
+        ]
         by_id={item["id"]:item for item in picks}
         strategy_names={item["strategy"] for item in picks}
-        for run in self.db.list_strategy_evaluation_runs(limit=window):
+        for run in matching_runs:
             summary=run.get("summary") if isinstance(run, dict) else None
             if not isinstance(summary, dict):
                 continue
@@ -133,4 +169,4 @@ class StrategyOutcomeService:
         ranked=sorted([x for x in items if x["sample_status"]=="ranked"],key=lambda x:x["avg_excess_return_pct"],reverse=True)
         for index,item in enumerate(ranked,start=1): item["rank"]=index
         remainder=sorted([x for x in items if x["sample_status"]!="ranked"],key=lambda x:x["strategy"])
-        return {"horizon":horizon,"window":window,"items":[*ranked,*remainder]}
+        return {"horizon":horizon,"window":window,"cohort":cohort,"items":[*ranked,*remainder]}
