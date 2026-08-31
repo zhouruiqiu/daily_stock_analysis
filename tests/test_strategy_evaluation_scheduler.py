@@ -30,3 +30,16 @@ def test_scheduler_runs_outcomes_after_close_and_skips_holiday():
     outcome=_Outcome(); scheduler=StrategyEvaluationScheduler(config_provider=lambda:SimpleNamespace(strategy_evaluation_enabled=True,strategy_evaluation_time="09:25",strategy_evaluation_daily_notify=False,strategy_evaluation_weekly_notify=False,strategy_evaluation_horizons=[1,3,5]),daily_service=_Daily(),outcome_service=outcome,notifier=_Notifier(),trading_day_provider=lambda day:day.day!=20)
     scheduler.tick(datetime(2026,8,19,15,10)); scheduler.tick(datetime(2026,8,20,15,10))
     assert outcome.calls==[datetime(2026,8,19).date()]
+
+
+def test_outcome_failure_is_isolated_from_wall_clock_service():
+    class _BrokenOutcome(_Outcome):
+        def run_due(self, day, horizons=None):
+            raise IndexError("calendar window too short")
+
+    scheduler=StrategyEvaluationScheduler(config_provider=lambda:SimpleNamespace(strategy_evaluation_enabled=True,strategy_evaluation_time="09:25",strategy_evaluation_daily_notify=False,strategy_evaluation_weekly_notify=False,strategy_evaluation_horizons=[1,3,5]),daily_service=_Daily(),outcome_service=_BrokenOutcome(),notifier=_Notifier(),trading_day_provider=lambda day:True)
+
+    result = scheduler.tick(datetime(2026,8,19,15,10))
+
+    assert result["executed"] == []
+    assert result["errors"] == ["outcomes: calendar window too short"]

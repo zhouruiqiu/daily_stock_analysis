@@ -27,7 +27,7 @@ class StrategyOutcomeService:
             import exchange_calendars as xcals
             cal = xcals.get_calendar("XSHG")
             first = cal.date_to_session(start, direction="next")
-            sessions = cal.sessions_window(first, count - 1)
+            sessions = cal.sessions_window(first, count)
             return [item.date() for item in sessions]
         except Exception:
             result=[]; current=start
@@ -67,6 +67,9 @@ class StrategyOutcomeService:
                 stock=self.bar_provider(pick["stock_code"],days[0],days[-1],is_index=False)
                 for horizon in requested:
                     payload={"pick_id":pick["id"],"horizon":f"{horizon}d","engine_version":OUTCOME_ENGINE_VERSION,"status":"pending"}
+                    if horizon >= len(days):
+                        payload["reason_code"] = "insufficient_calendar_window"
+                        self.db.upsert_strategy_evaluation_outcome(payload); pending+=1; continue
                     target=days[horizon]
                     if target > as_of_date or stock.empty or benchmark.empty:
                         self.db.upsert_strategy_evaluation_outcome(payload); pending+=1; continue
@@ -95,13 +98,28 @@ class StrategyOutcomeService:
     def get_leaderboard(self, horizon: str = "5d", *, window: int = 20) -> dict[str, Any]:
         picks=self.db.list_strategy_evaluation_picks()
         by_id={item["id"]:item for item in picks}
-        groups: dict[str,list[dict[str,Any]]]={}
+        strategy_names={item["strategy"] for item in picks}
+        for run in self.db.list_strategy_evaluation_runs(limit=window):
+            summary=run.get("summary") if isinstance(run, dict) else None
+            if not isinstance(summary, dict):
+                continue
+            for key in ("strategies", "failures"):
+                values=summary.get(key)
+                if isinstance(values, dict):
+                    strategy_names.update(str(name) for name in values if str(name))
+        groups: dict[str,list[dict[str,Any]]]={strategy: [] for strategy in sorted(strategy_names)}
         for row in self.db.list_strategy_evaluation_outcomes():
             pick=by_id.get(row["pick_id"])
             if pick and row["horizon"]==horizon and row["status"]=="evaluated":
                 groups.setdefault(pick["strategy"],[]).append(row)
         items=[]
         for strategy,rows in groups.items():
+            if not rows:
+                items.append({"strategy":strategy,"complete_days":0,"evaluated_count":0,
+                    "avg_return_pct":None,"avg_excess_return_pct":None,
+                    "positive_rate_pct":None,"beat_benchmark_rate_pct":None,
+                    "max_adverse_excursion_pct":None,"sample_status":"pending","rank":None})
+                continue
             run_days=len({by_id[row["pick_id"]]["run_id"] for row in rows})
             count=len(rows)
             avg=lambda key: round(sum(float(row[key]) for row in rows if row.get(key) is not None)/count,4)

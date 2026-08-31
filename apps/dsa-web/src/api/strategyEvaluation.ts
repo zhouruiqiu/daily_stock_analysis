@@ -1,7 +1,7 @@
 import apiClient from './index';
 import { toCamelCase } from './utils';
 
-export type LeaderboardItem = { rank?: number | null; strategy: string; completeDays: number; evaluatedCount: number; avgReturnPct: number; avgExcessReturnPct: number; positiveRatePct: number; beatBenchmarkRatePct: number; maxAdverseExcursionPct: number; sampleStatus: string };
+export type LeaderboardItem = { rank?: number | null; strategy: string; completeDays: number; evaluatedCount: number; avgReturnPct?: number | null; avgExcessReturnPct?: number | null; positiveRatePct?: number | null; beatBenchmarkRatePct?: number | null; maxAdverseExcursionPct?: number | null; sampleStatus: string };
 export type EvaluationStatus = { enabled: boolean; time: string; topN: number; horizons: number[]; latestRun?: { selectionDate?: string; status?: string } | null };
 export type EvaluationRunList = { items: Array<{ runId: string; selectionDate: string; status: string }>; count: number };
 export const strategyEvaluationApi = {
