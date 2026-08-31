@@ -326,6 +326,27 @@ class ScreeningRun(Base):
     )
 
 
+class NotificationDigestEvent(Base):
+    """Buffered notification event waiting to be merged into a digest push."""
+
+    __tablename__ = 'notification_digest_events'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dedup_key = Column(String(128), nullable=False, index=True)
+    event_type = Column(String(32), nullable=False, default='general', index=True)
+    severity = Column(String(16), nullable=False, default='normal')
+    title = Column(String(255), nullable=False, default='')
+    content = Column(Text, nullable=False)
+    occurred_at = Column(DateTime, nullable=False, default=utc_naive_now, index=True)
+    sent_at = Column(DateTime, index=True)
+    digest_slot = Column(String(32))
+    created_at = Column(DateTime, default=utc_naive_now, nullable=False)
+
+    __table_args__ = (
+        Index('ix_notification_digest_event_pending', 'sent_at', 'occurred_at'),
+    )
+
+
 class StrategyEvaluationRun(Base):
     __tablename__ = 'strategy_evaluation_runs'
 

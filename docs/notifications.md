@@ -376,3 +376,23 @@ Secret 适合 token、password、webhook URL 等敏感项；Variable 适合 `WEC
 - GitHub Actions：清空或删除对应 Secret / Variable；未映射的 key 不会进入 workflow 运行进程。
 - Desktop：使用配置备份导入旧 `.env`，或在设置页清空对应渠道配置并保存。
 - 版本回退：P6/P7 新增的 `NTFY_*`、`GOTIFY_*`、路由和降噪 key 在旧版本中会被忽略；若要避免误导，应同时从 `.env` 或 Actions 配置中移除。
+
+## 通知聚合简报
+
+盘中 `alert` 路由的普通推送可按固定时点合并为综合简报，解决盯盘 / 选股 / 评测 / 趋势变化推送分散的问题。默认关闭，未启用时保持逐条立即发送的旧行为。
+
+| 配置 key | 默认值 | 说明 |
+| --- | --- | --- |
+| `NOTIFICATION_DIGEST_ENABLED` | `false` | 开启后 `alert` 路由普通事件缓冲进 `notification_digest_events` 表，等待简报时点合并发送 |
+| `NOTIFICATION_DIGEST_TIMES` | `10:05,11:35,15:15` | 简报时点（HH:MM 逗号分隔），到点把全部未发送事件合并为一条推送 |
+| `NOTIFICATION_DIGEST_MAX_EVENTS` | `30` | 单份简报最多展示事件数，超出部分以「另有 N 条」提示 |
+
+行为边界：
+
+- **紧急旁路**：`severity=critical`（或 `urgent`/`emergency`）以及内容命中「相对昨收大幅下跌 / 跌破支撑 / 数据源全部不可用」标记的通知不缓冲，仍然立即发送。简报本体自身以 `critical` 级别发送，天然绕过缓冲，不会递归聚合。
+- **去重**：按 `dedup_key`（未传时按路由+内容 hash）去重，未发送的重复事件只保留一条。
+- **可靠投递**：简报发送成功才写入 `sent_at`；失败则事件保留，进入下一个时点重试。事件持久化在数据库中，服务重启后已发送的不重复推、未发送的进入下一份简报。
+- **顺序**：噪音抑制（去重 / 冷却 / 静默时段）先于聚合判断，被降噪拦截的通知不会进入简报。
+- **失败兜底**：聚合缓冲自身出错时 fail-open，原通知按普通路径立即发送。
+- **适用范围**：仅拦截 `route_type=alert` 的静态渠道推送；`report` 路由（分析报告）、机器人会话回执不受影响。
+- 调度依赖 `main.py --schedule` / `--intraday-watch-only` 的墙上时钟循环；时点匹配同一分钟内幂等（claim 一次）。

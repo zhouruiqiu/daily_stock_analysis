@@ -26,6 +26,7 @@ def intraday_capabilities_enabled(config: Any) -> bool:
         or getattr(config, "intraday_market_monitor_enabled", False)
         or getattr(config, "intraday_screening_enabled", False)
         or getattr(config, "strategy_evaluation_enabled", False)
+        or getattr(config, "notification_digest_enabled", False)
     )
 
 
@@ -180,6 +181,36 @@ class IntradaySessionCoordinator:
             key = self._slot_key("watch", current)
             if self._claim(key) and self._launch_watch(current):
                 result["executed"].append("watch")
+
+        digest_times = set(
+            getattr(config, "notification_digest_times", None) or ["10:05", "11:35", "15:15"]
+        )
+        if bool(getattr(config, "notification_digest_enabled", False)) and current_time in digest_times:
+            key = self._slot_key("digest", current)
+            if self._claim(key):
+                try:
+                    from src.services.notification_digest_service import (
+                        NotificationDigestService,
+                    )
+                    from src.storage import DatabaseManager
+
+                    digest = NotificationDigestService(
+                        DatabaseManager(),
+                        max_events=int(
+                            getattr(config, "notification_digest_max_events", 30) or 30
+                        ),
+                    )
+                    stats = digest.flush(slot=current_time, now=current)
+                    if stats.get("event_count"):
+                        result["executed"].append("digest")
+                        logger.info(
+                            "[IntradaySession] %s 简报已处理 %s 条事件（sent=%s）",
+                            current_time,
+                            stats.get("event_count"),
+                            stats.get("sent"),
+                        )
+                except Exception as exc:  # noqa: BLE001 - 简报失败不影响盘中任务。
+                    logger.exception("[IntradaySession] digest flush failed: %s", exc)
         return result
 
     @staticmethod

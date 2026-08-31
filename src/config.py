@@ -1245,6 +1245,10 @@ class Config:
     strategy_evaluation_benchmark: str = "000300"
     strategy_evaluation_daily_notify: bool = True
     strategy_evaluation_weekly_notify: bool = True
+    # 通知聚合：alert 路由的普通盘中推送缓冲为固定时点综合简报；紧急事件（急跌/跌破支撑）仍立即发送
+    notification_digest_enabled: bool = False
+    notification_digest_times: List[str] = field(default_factory=lambda: ["10:05", "11:35", "15:15"])
+    notification_digest_max_events: int = 30
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2301,6 +2305,20 @@ class Config:
             ),
             strategy_evaluation_weekly_notify=parse_env_bool(
                 os.getenv('STRATEGY_EVALUATION_WEEKLY_NOTIFY'), default=True,
+            ),
+            notification_digest_enabled=parse_env_bool(
+                os.getenv('NOTIFICATION_DIGEST_ENABLED'),
+                default=False,
+            ),
+            notification_digest_times=normalize_schedule_times(
+                os.getenv('NOTIFICATION_DIGEST_TIMES', '10:05,11:35,15:15'),
+                fallback_time='10:05',
+            ),
+            notification_digest_max_events=parse_env_int(
+                os.getenv('NOTIFICATION_DIGEST_MAX_EVENTS'),
+                30,
+                field_name='NOTIFICATION_DIGEST_MAX_EVENTS',
+                minimum=1,
             ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),

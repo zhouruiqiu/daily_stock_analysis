@@ -301,6 +301,7 @@ class NotificationService(
         config = get_config()
         self._config = config
         self._source_message = source_message
+        self._digest_db_manager = None
         self._context_channels: List[str] = []
 
         # Markdown 转图片（Issue #289）
@@ -638,6 +639,62 @@ class NotificationService(
     def release_noise_control(decision: NotificationNoiseDecision) -> None:
         """Release static-channel in-flight noise reservation after send failure."""
         release_notification_noise(decision)
+
+    # ===== Notification digest =====
+    def _maybe_buffer_notification_digest(
+        self,
+        content: str,
+        *,
+        route_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        dedup_key: Optional[str] = None,
+    ) -> Optional[str]:
+        """把 alert 路由的普通通知缓冲进聚合简报。
+
+        Returns:
+            None 表示不做缓冲（紧急事件/未启用/出错，调用方继续立即发送）；
+            "digest_buffered" 表示已入库等待简报；"digest_deduped" 表示与
+            未发送事件重复已忽略。
+        """
+        if not getattr(self._config, "notification_digest_enabled", False):
+            return None
+        if (route_type or "") != "alert":
+            return None
+        from src.services.notification_digest_service import classify_urgency
+
+        try:
+            if classify_urgency(severity=severity, content=content):
+                return None
+            from src.services.notification_digest_service import (
+                NotificationDigestService,
+            )
+
+            service = NotificationDigestService(
+                self._get_digest_db_manager(),
+                max_events=int(
+                    getattr(self._config, "notification_digest_max_events", 30) or 30
+                ),
+            )
+            outcome = service.record_event(
+                content=content,
+                route_type=route_type,
+                severity=severity,
+                dedup_key=dedup_key,
+            )
+            if outcome.duplicate:
+                return "digest_deduped"
+            return "digest_buffered" if outcome.buffered else None
+        except Exception as exc:  # noqa: BLE001 - 聚合失败必须放行原始通知
+            logger.warning("通知聚合缓冲失败，按普通通知立即发送: %s", exc)
+            return None
+
+    def _get_digest_db_manager(self):
+        """聚合事件的持久化入口（DatabaseManager 为单例，重复获取无额外开销）。"""
+        if self._digest_db_manager is None:
+            from src.storage import DatabaseManager
+
+            self._digest_db_manager = DatabaseManager()
+        return self._digest_db_manager
 
     # ===== Context channel =====
     def _has_context_channel(self) -> bool:
@@ -2707,6 +2764,26 @@ class NotificationService(
                 status=status,
                 channel_results=results,
                 message=noise_decision.message,
+            )
+
+        # 通知聚合（Task 1/2）：alert 路由的普通事件缓冲进 digest，
+        # 到 10:05/11:35/15:15 合并发送；紧急事件（severity=critical 或内容命中
+        # 急跌/跌破支撑标记）原样放行立即送达。简报本体以 severity=critical
+        # 发送，天然绕过此处拦截，不会递归。噪音抑制在上一步已先行处理。
+        digest_status = self._maybe_buffer_notification_digest(
+            content,
+            route_type=route_type,
+            severity=severity,
+            dedup_key=dedup_key,
+        )
+        if digest_status is not None:
+            logger.info("通知已进入聚合缓冲（%s），等待简报时点合并发送", digest_status)
+            return NotificationDispatchResult(
+                dispatched=False,
+                success=True,
+                status=digest_status,
+                channel_results=[],
+                message="notification buffered into digest",
             )
 
         # Markdown to image (Issue #289): convert once if any channel needs it.
