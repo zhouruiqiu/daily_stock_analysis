@@ -347,6 +347,25 @@ class NotificationDigestEvent(Base):
     )
 
 
+class PortfolioRiskState(Base):
+    """组合风险状态机的持久化高点与状态（交易计划 Task 7）。
+
+    峰值净值只增不减（高水位线），服务重启不重置；
+    回撤状态由净值相对峰值计算，锁定后需净值恢复或用户显式解除。
+    """
+
+    __tablename__ = 'portfolio_risk_states'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, nullable=False, unique=True, index=True)
+    peak_equity = Column(Float, nullable=False, default=0.0)
+    risk_state = Column(String(16), nullable=False, default='normal', index=True)
+    drawdown_pct = Column(Float, nullable=False, default=0.0)
+    locked_at = Column(DateTime)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, nullable=False)
+    created_at = Column(DateTime, default=utc_naive_now, nullable=False)
+
+
 class StrategyEvaluationRun(Base):
     __tablename__ = 'strategy_evaluation_runs'
 

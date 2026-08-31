@@ -1249,6 +1249,8 @@ class Config:
     notification_digest_enabled: bool = False
     notification_digest_times: List[str] = field(default_factory=lambda: ["10:05", "11:35", "15:15"])
     notification_digest_max_events: int = 30
+    # 组合交易计划：只生成规则化风险管理建议（hold/observe/reduce/exit 等），不自动下单
+    portfolio_trading_plan_enabled: bool = False
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2319,6 +2321,10 @@ class Config:
                 30,
                 field_name='NOTIFICATION_DIGEST_MAX_EVENTS',
                 minimum=1,
+            ),
+            portfolio_trading_plan_enabled=parse_env_bool(
+                os.getenv('PORTFOLIO_TRADING_PLAN_ENABLED'),
+                default=False,
             ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),

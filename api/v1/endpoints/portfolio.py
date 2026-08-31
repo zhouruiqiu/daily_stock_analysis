@@ -44,6 +44,9 @@ from src.services.portfolio_service import (
     PortfolioOversellError,
     PortfolioService,
 )
+from src.services.portfolio_trading_plan_service import PortfolioTradingPlanService
+from src.config import get_config
+from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -624,6 +627,57 @@ def commit_csv_import(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Commit CSV import failed", exc)
+
+
+@router.get(
+    "/trading-plan",
+    summary="Get rule-based portfolio trading plan",
+    description=(
+        "Generate a risk-management trading plan (hold/observe/reduce/exit/add_if_confirmed/blocked) "
+        "from the portfolio snapshot, market trend state, realtime quotes and technical supports. "
+        "Plan only; no orders are placed automatically."
+    ),
+    responses={403: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+def get_trading_plan(
+    account_id: Optional[int] = Query(None, description="Optional account id; default picks the largest active account"),
+    market_state: Optional[str] = Query(
+        None,
+        description="Market trend state override: neutral | sustained_up | sustained_down; default reads live state when available",
+    ),
+) -> JSONResponse:
+    config = get_config()
+    if not bool(getattr(config, "portfolio_trading_plan_enabled", False)):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "trading_plan_disabled",
+                "message": "PORTFOLIO_TRADING_PLAN_ENABLED 未启用；交易计划只读生成，开启后不涉及自动下单。",
+            },
+        )
+    resolved_state = (market_state or "").strip() or _current_market_trend_state()
+    service = PortfolioTradingPlanService(DatabaseManager())
+    try:
+        plan = service.build_plan(account_id=account_id, market_state=resolved_state)
+        return JSONResponse(content=plan.to_dict())
+    except Exception as exc:
+        raise _internal_error("Build trading plan failed", exc)
+
+
+def _current_market_trend_state() -> str:
+    """Best-effort live market trend state; neutral on any failure."""
+    try:
+        from src.services.intraday_market_monitor import (
+            IntradayMarketMonitor,
+            MarketTrendState,
+        )
+
+        monitor = IntradayMarketMonitor(notifications_enabled=False)
+        snapshot = monitor.run_once()
+        return MarketTrendState(snapshot.state).value
+    except Exception as exc:  # noqa: BLE001 - fallback to neutral, plan still computes
+        logger.warning("[TradingPlan] 大盘状态读取失败，按 neutral 处理: %s", exc)
+        return "neutral"
 
 
 @router.post(
