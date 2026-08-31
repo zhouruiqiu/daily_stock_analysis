@@ -33,7 +33,8 @@ def _get_fetcher_manager():
 def _handle_get_market_indices(region: str = "cn") -> dict:
     """Get major market indices."""
     manager = _get_fetcher_manager()
-    indices = manager.get_main_indices(region=region)
+    # 跳过日线型数据源，回答"当前行情"类问题不得回退到上一交易日快照
+    indices = manager.get_main_indices(region=region, require_realtime=True)
 
     if not indices:
         return {"error": f"No market index data available for region '{region}'"}

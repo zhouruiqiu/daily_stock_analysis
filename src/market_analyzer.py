@@ -456,8 +456,13 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         try:
             logger.info("[大盘] %s action=get_main_indices status=start", self._log_context())
 
-            # 使用 DataFetcherManager 获取指数行情（按 region 切换）
-            data_list = self.data_manager.get_main_indices(region=self.region)
+            # 使用 DataFetcherManager 获取指数行情（按 region 切换）。
+            # require_realtime=True 跳过日线型数据源（如 Tushare index_daily），
+            # 避免收盘后当日 bar 未更新时把上一交易日行情当作"今日"复盘。
+            data_list = self.data_manager.get_main_indices(
+                region=self.region,
+                require_realtime=True,
+            )
 
             if data_list:
                 for item in data_list:
