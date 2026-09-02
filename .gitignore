@@ -89,3 +89,6 @@ static/
 /apps/dsa-desktop/node_modules/
 /node_modules/
 docs/specs/
+
+# 跨 agent 操作日志（含服务器运维细节，禁止入库）
+AGENT_LOG.md
