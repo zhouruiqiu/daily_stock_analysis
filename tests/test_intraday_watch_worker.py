@@ -50,6 +50,25 @@ def _ok_dispatch():
 
 class TestIntradayWatchWorker(unittest.TestCase):
 
+    def test_long_watch_messages_keep_each_stock_on_one_numbered_part(self):
+        from src.formatters import chunk_content_by_max_bytes
+
+        worker = IntradayWatchWorker()
+        items = [
+            {"code": code, "trend": TrendAnalysisResult(code=code),
+             "quote": SimpleNamespace(name="示例股票", price=41.23),
+             "score": IntradayPositionScore(score=40, recommendation="观察", risk_level="高",
+                 is_held=True, technical_score=30, negative_reasons=["技术风险" * 12])}
+            for code in ("600000", "600001", "600002")
+        ]
+        content = worker._format_intraday_watch("cn", MarketPhase.INTRADAY, items)
+        chunks = chunk_content_by_max_bytes(content, 900, add_page_marker=True)
+        self.assertGreater(len(chunks), 1)
+        for item in items:
+            stock_block = worker._format_one_stock(item)
+            self.assertEqual(sum(stock_block in chunk for chunk in chunks), 1)
+        self.assertTrue(all(len(chunk.encode("utf-8")) <= 900 for chunk in chunks))
+
     def test_breached_holding_is_sorted_first_and_highlighted(self):
         worker = IntradayWatchWorker()
         normal_score = IntradayPositionScore(
@@ -147,10 +166,29 @@ class TestIntradayWatchWorker(unittest.TestCase):
         self.assertIn("盯盘速报", content)
         self.assertIn("综合评分", content)
         self.assertIn("持仓", content)
-        self.assertIn("成本", content)
-        self.assertEqual(
-            notifier.send_with_results.call_args.kwargs.get("route_type"), "alert"
+        self.assertNotIn("成本", content)
+        self.assertEqual(notifier.send_with_results.call_args.kwargs.get("route_type"), "alert")
+        self.assertTrue(notifier.send_with_results.call_args.kwargs.get("bypass_digest"))
+
+    def test_notification_hides_personal_cost_pnl_and_cost_derived_defense(self):
+        worker = IntradayWatchWorker()
+        score = IntradayPositionScore(
+            score=42, recommendation="考虑减仓", risk_level="高", is_held=True,
+            technical_score=30, avg_cost=321.09, pnl_pct=-18.88, defense_price=305.04,
+            positive_reasons=["持仓浮盈较厚", "MACD 多头"],
+            negative_reasons=["持仓浮亏较大", "均线处于空头"],
         )
+        content = worker._format_one_stock({
+            "code": "600000", "trend": TrendAnalysisResult(code="600000"),
+            "quote": SimpleNamespace(name="示例股票", price=41.23, change_pct=-1.2),
+            "score": score,
+        })
+        for secret in ("成本", "浮盈", "浮亏", "321.09", "18.88", "305.04"):
+            self.assertNotIn(secret, content)
+        self.assertIn("41.23", content)
+        self.assertIn("考虑减仓", content)
+        self.assertLess(content.index("现价"), content.index("MACD"))
+        self.assertLessEqual(len(content.splitlines()), 8)
 
     @mock.patch("src.core.trading_calendar.infer_market_phase")
     def test_empty_stock_list_skips(self, mock_phase):

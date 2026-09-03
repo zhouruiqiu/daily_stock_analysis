@@ -217,6 +217,6 @@ class IntradayMarketMonitor:
                 from src.notification import NotificationService
 
                 notifier = NotificationService()
-            notifier.send_with_results(content, route_type="alert")
+            notifier.send_with_results(content, route_type="alert", bypass_digest=True)
         except Exception as exc:  # noqa: BLE001 - monitoring must keep running.
             logger.warning("[IntradayMarket] trend notification failed: %s", exc)

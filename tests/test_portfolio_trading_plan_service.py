@@ -125,6 +125,23 @@ class HelpersTest(TestCase):
         self.assertIn("香农芯创 300475｜观察", content)
         self.assertIn("这是规则化风险管理计划，不构成收益保证或自动交易指令。", content)
 
+    def test_digest_never_exposes_account_amounts_quantities_or_pnl_in_reasons(self) -> None:
+        plan = SimpleNamespace(
+            total_equity=123456.78, exposure_pct=76.54, target_exposure_pct=60,
+            cash_pct=23.46, drawdown_pct=5.67, risk_state="defensive",
+            items=[SimpleNamespace(
+                stock_name="示例股票", stock_code="600000", action="reduce",
+                current_weight_pct=33.33, action_reason="跌破支撑且浮亏 -18.88%，成本321.09",
+                max_reduce_quantity=700, max_additional_quantity=0,
+            )],
+        )
+        content = format_trading_plan_digest(plan)
+        for secret in ("123,456.78", "76.5", "5.67", "700股", "18.88", "321.09", "33.3"):
+            self.assertNotIn(secret, content)
+        self.assertIn("示例股票", content)
+        self.assertIn("建议减仓", content)
+        self.assertIn("防守", content)
+
 
 class RiskStateMachineTest(TestCase):
     def setUp(self) -> None:

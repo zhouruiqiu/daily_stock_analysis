@@ -37,7 +37,8 @@ _PUSH_DISCLAIMER = "这是规则化风险管理计划，不构成收益保证或
 
 
 def format_trading_plan_digest(plan: PortfolioTradingPlan) -> str:
-    """Render a compact, read-only portfolio plan for the closing digest."""
+    """Render public advice only; amounts and personal performance remain on Web."""
+    from src.services.notification_privacy import contains_portfolio_details
     action_labels = {
         "hold": "持有",
         "observe": "观察",
@@ -54,22 +55,21 @@ def format_trading_plan_digest(plan: PortfolioTradingPlan) -> str:
     }
     lines = [
         "📋 收盘交易计划",
-        f"净资产：¥{plan.total_equity:,.2f}｜仓位：{plan.exposure_pct:.1f}%"
-        f"（目标 {plan.target_exposure_pct:.1f}%）｜现金：{plan.cash_pct:.1f}%",
-        f"风险状态：{risk_labels.get(plan.risk_state, plan.risk_state)}｜回撤：{plan.drawdown_pct:.2f}%",
+        f"风险状态：{risk_labels.get(plan.risk_state, plan.risk_state)}",
+        "账户明细已隐藏，完整计划请登录 Web 查看。",
+        "",
     ]
     for item in plan.items:
-        quantity_parts = []
-        if item.max_reduce_quantity:
-            quantity_parts.append(f"最多减{item.max_reduce_quantity:g}股")
-        if item.max_additional_quantity:
-            quantity_parts.append(f"条件加{item.max_additional_quantity:g}股")
-        quantity = f"｜{'、'.join(quantity_parts)}" if quantity_parts else ""
         lines.append(
             f"{item.stock_name} {item.stock_code}｜"
-            f"{action_labels.get(item.action, item.action)}｜仓位{item.current_weight_pct:.1f}%"
-            f"{quantity}｜{item.action_reason}"
+            f"{action_labels.get(item.action, item.action)}"
         )
+        reason = str(item.action_reason or "")
+        if reason and not contains_portfolio_details(reason):
+            lines.append(f"原因：{reason}")
+        else:
+            lines.append("原因：触发账户风险约束，详情仅在 Web 展示。")
+        lines.append("")
     lines.append(_PUSH_DISCLAIMER)
     return "\n".join(lines)
 

@@ -288,6 +288,11 @@ class NotificationDigestService:
                 occurred = event.get("occurred_at")
                 time_tag = occurred.strftime("%H:%M") if occurred else "--:--"
                 body = (event.get("content") or "").strip()
+                from src.services.notification_privacy import contains_portfolio_details
+
+                if event_type == "portfolio_watch" and contains_portfolio_details(body):
+                    # Old persisted events must not leak details after upgrading the renderer.
+                    body = "历史账户明细已隐藏，请登录 Web 查看最新计划。"
                 lines.append(f"· {time_tag} {body}")
                 lines.append("")
         if truncated:

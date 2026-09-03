@@ -127,7 +127,7 @@ class IntradayScreeningWorker:
             )
 
         try:
-            dispatch = self._get_notifier().send_with_results(content, route_type="alert")
+            dispatch = self._get_notifier().send_with_results(content, route_type="alert", bypass_digest=True)
             stats["notified"] = int(bool(getattr(dispatch, "success", False)))
         except Exception as exc:  # noqa: BLE001 - notification failure is isolated.
             logger.warning("[IntradayScreening] notification failed: %s", exc)

@@ -150,6 +150,26 @@ class DigestServiceTest(TestCase):
         self.assertEqual(stats["event_count"], 0)
         self.assertEqual(len(sender.sent), 0)
 
+    def test_privacy_safe_locked_plan_keeps_actions_and_disclaimer(self) -> None:
+        content = "📋 收盘交易计划\n风险状态：回撤锁定\n示例股票 600000｜建议减仓\n这是规则化风险管理计划，不构成收益保证或自动交易指令。"
+        self.service.record_event(content=content, route_type="alert")
+        sender = _Sender()
+        self.service.flush(slot="15:15", sender=sender)
+        self.assertIn("600000｜建议减仓", sender.sent[0][0])
+        self.assertIn("不构成收益保证", sender.sent[0][0])
+
+    def test_legacy_pending_portfolio_content_cannot_leak_financial_details(self) -> None:
+        self.service.record_event(
+            content="📋 收盘交易计划\n净资产：¥123,456.78｜现金：5000\n测试股票｜最多减200股｜浮亏12.34%",
+            route_type="alert",
+        )
+        sender = _Sender()
+        self.service.flush(slot="15:15", sender=sender)
+        content = sender.sent[0][0]
+        for secret in ("123,456.78", "5000", "200股", "12.34%"):
+            self.assertNotIn(secret, content)
+        self.assertIn("已隐藏", content)
+
 
 class NotificationInterceptionTest(TestCase):
     """NotificationService 拦截层：不初始化完整服务，只测 digest 分支。"""
@@ -175,6 +195,15 @@ class NotificationInterceptionTest(TestCase):
         )
         self.assertEqual(status, "digest_buffered")
         self.assertEqual(NotificationDigestService(db).pending_count(), 1)
+
+    def test_explicit_immediate_delivery_never_buffers_or_marks_urgent(self) -> None:
+        db = _fake_db()
+        fake, cls = self._service(db)
+        status = cls._maybe_buffer_notification_digest(
+            fake, "普通盯盘内容", route_type="alert", bypass_digest=True,
+        )
+        self.assertIsNone(status)
+        self.assertEqual(NotificationDigestService(db).pending_count(), 0)
 
     def test_urgent_content_passes_through(self) -> None:
         db = _fake_db()

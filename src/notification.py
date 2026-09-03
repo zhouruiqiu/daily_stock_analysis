@@ -648,6 +648,7 @@ class NotificationService(
         route_type: Optional[str] = None,
         severity: Optional[str] = None,
         dedup_key: Optional[str] = None,
+        bypass_digest: bool = False,
     ) -> Optional[str]:
         """把 alert 路由的普通通知缓冲进聚合简报。
 
@@ -656,7 +657,7 @@ class NotificationService(
             "digest_buffered" 表示已入库等待简报；"digest_deduped" 表示与
             未发送事件重复已忽略。
         """
-        if not getattr(self._config, "notification_digest_enabled", False):
+        if bypass_digest or not getattr(self._config, "notification_digest_enabled", False):
             return None
         if (route_type or "") != "alert":
             return None
@@ -2661,6 +2662,7 @@ class NotificationService(
         dedup_key: Optional[str] = None,
         cooldown_key: Optional[str] = None,
         structured_payload: Optional[Dict[str, Any]] = None,
+        bypass_digest: bool = False,
     ) -> NotificationDispatchResult:
         """
         Send a notification and return per-channel diagnostics.
@@ -2682,6 +2684,7 @@ class NotificationService(
             dedup_key: 可选稳定去重 key；未设置时使用内容 hash
             cooldown_key: 可选冷却 key；未设置时使用路由/级别默认 key
             structured_payload: 可选的个股或市场结构化结果，仅用于图片模板精确填充
+            bypass_digest: 实时通知直接送达，不改变 severity 或绕过其他降噪规则
 
         Returns:
             Structured dispatch diagnostics.
@@ -2775,6 +2778,7 @@ class NotificationService(
             route_type=route_type,
             severity=severity,
             dedup_key=dedup_key,
+            bypass_digest=bypass_digest,
         )
         if digest_status is not None:
             logger.info("通知已进入聚合缓冲（%s），等待简报时点合并发送", digest_status)

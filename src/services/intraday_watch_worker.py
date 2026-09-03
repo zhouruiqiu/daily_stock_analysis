@@ -245,7 +245,9 @@ class IntradayWatchWorker:
                 getattr(item.get("score"), "support_breached", False)
             ),
         )
-        for item in ordered_items:
+        for index, item in enumerate(ordered_items):
+            if index:
+                lines.append("---")
             lines.append(self._format_one_stock(item))
             lines.append("")
         return "\n".join(lines).rstrip()
@@ -266,17 +268,12 @@ class IntradayWatchWorker:
         change_str = self._fmt_change(change_pct, change_amount)
 
         ma_alignment = getattr(trend, "ma_alignment", "") or ""
-        bias_ma5 = getattr(trend, "bias_ma5", None)
-        ma5 = getattr(trend, "ma5", None)
-        ma10 = getattr(trend, "ma10", None)
-        ma20 = getattr(trend, "ma20", None)
 
         macd_status = self._enum_value(getattr(trend, "macd_status", None))
         rsi6 = getattr(trend, "rsi_6", None)
         rsi_status = self._enum_value(getattr(trend, "rsi_status", None))
         vol_status = self._enum_value(getattr(trend, "volume_status", None))
         volume_ratio = getattr(quote, "volume_ratio", None)
-        turnover = getattr(quote, "turnover_rate", None)
 
         support = self._fmt_levels(getattr(trend, "support_levels", []))
         resistance = self._fmt_levels(getattr(trend, "resistance_levels", []))
@@ -298,53 +295,33 @@ class IntradayWatchWorker:
                 f"综合评分 {score.score}/100 · {identity} · "
                 f"{score.recommendation} · 风险{score.risk_level}"
             )
-            if score.is_held:
-                position_bits = []
-                if score.avg_cost is not None:
-                    position_bits.append(f"成本{_fmt_num(score.avg_cost)}")
-                if score.pnl_pct is not None:
-                    position_bits.append(f"浮盈亏{_fmt_num(score.pnl_pct, '+.2f')}%")
-                if score.defense_price is not None:
-                    position_bits.append(f"防守位{_fmt_num(score.defense_price)}")
-                if position_bits:
-                    parts.append(" ".join(position_bits))
-            if score.positive_reasons:
-                parts.append("加分：" + "、".join(score.positive_reasons))
-            if score.negative_reasons:
-                parts.append("风险：" + "、".join(score.negative_reasons))
-        # 价格行
-        price_line = f"现价 {_fmt_num(price)} {change_str}".rstrip()
-        parts.append(price_line)
-        # 均线行
-        ma_bits = []
-        if ma_alignment:
-            ma_bits.append(ma_alignment)
-        ma_vals = []
-        for label, val in (("MA5", ma5), ("MA10", ma10), ("MA20", ma20)):
-            if val is not None:
-                ma_vals.append(f"{label}={_fmt_num(val)}")
-        if ma_vals:
-            ma_bits.append("/".join(ma_vals))
-        if bias_ma5 is not None:
-            ma_bits.append(f"乖离{_fmt_num(bias_ma5, '+.2f')}%")
-        if ma_bits:
-            parts.append(" ".join(ma_bits))
+            parts.append(f"现价 {_fmt_num(price)} {change_str}".rstrip())
+            from src.services.notification_privacy import contains_portfolio_details
+
+            public_good = [r for r in score.positive_reasons if not contains_portfolio_details(r)]
+            public_bad = [r for r in score.negative_reasons if not contains_portfolio_details(r)]
+            if public_bad:
+                parts.append("风险：" + "、".join(public_bad[:2]))
+            if public_good:
+                parts.append("参考：" + "、".join(public_good[:2]))
+        else:
+            parts.append(f"现价 {_fmt_num(price)} {change_str}".rstrip())
         # 指标行
         ind_bits = []
+        if ma_alignment:
+            ind_bits.append(ma_alignment)
         if macd_status:
             ind_bits.append(f"MACD {macd_status}")
         if rsi6 is not None:
             ind_bits.append(f"RSI6={_fmt_num(rsi6, '.0f')}")
-        if rsi_status:
+        if rsi_status and rsi6 is None:
             ind_bits.append(rsi_status)
         if volume_ratio is not None:
             ind_bits.append(f"量比{_fmt_num(volume_ratio, '.2f')}")
-        if turnover is not None:
-            ind_bits.append(f"换手{_fmt_num(turnover, '.2f')}%")
-        if vol_status:
+        if vol_status and volume_ratio is None:
             ind_bits.append(vol_status)
         if ind_bits:
-            parts.append(" ".join(ind_bits))
+            parts.append("技术：" + " · ".join(ind_bits))
         # 支撑压力行
         if support or resistance:
             parts.append(f"支撑{support or '-'} / 压力{resistance or '-'}")
@@ -355,7 +332,7 @@ class IntradayWatchWorker:
         from src.notification import NotificationService
 
         notifier = self.notifier or NotificationService()
-        result = notifier.send_with_results(content, route_type="alert")
+        result = notifier.send_with_results(content, route_type="alert", bypass_digest=True)
         return bool(getattr(result, "success", False))
 
     # ---- 格式化小工具 ----

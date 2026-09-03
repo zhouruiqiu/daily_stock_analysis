@@ -29,7 +29,8 @@ class _Notifier:
     def __init__(self):
         self.messages = []
 
-    def send_with_results(self, content, *, route_type):
+    def send_with_results(self, content, *, route_type, bypass_digest):
+        assert bypass_digest is True
         self.messages.append((content, route_type))
         return type("Dispatch", (), {"success": True})()
 
